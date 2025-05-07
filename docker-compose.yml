@@ -109,6 +109,19 @@ services:
       - prometheus
       - tempo
 
+  cerebro:
+    image: lmenezes/cerebro:0.9.4
+    container_name: cerebro
+    ports:
+      - "9000:9000"
+    environment:
+      - ELASTICSEARCH_HOST=http://elasticsearch:9200
+    depends_on:
+      - elasticsearch
+    networks:
+      - monitoring
+    restart: unless-stopped
+
 networks:
   monitoring:
     driver: bridge

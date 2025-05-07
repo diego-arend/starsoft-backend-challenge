@@ -5,10 +5,6 @@ import { ElasticSearchRepository } from './elastic.repository';
 
 /**
  * Service for managing Elasticsearch operations
- *
- * Provides high-level functionality for working with Elasticsearch including
- * index initialization, health monitoring, searching, and indexing operations.
- * Implements OnModuleInit to ensure Elasticsearch is properly set up when the application starts.
  */
 @Injectable()
 export class ElasticSearchService implements OnModuleInit {
@@ -25,9 +21,6 @@ export class ElasticSearchService implements OnModuleInit {
 
   /**
    * Initializes the Elasticsearch service when the module is loaded
-   *
-   * Called automatically by NestJS when the module initializes.
-   * Sets up the Elasticsearch index and verifies the connection.
    */
   async onModuleInit() {
     await this.setupElasticsearch();
@@ -35,13 +28,6 @@ export class ElasticSearchService implements OnModuleInit {
 
   /**
    * Configures Elasticsearch, checking and creating indices if necessary
-   *
-   * Performs initial setup tasks:
-   * 1. Checks Elasticsearch health/connection
-   * 2. Creates required indices if they don't exist
-   *
-   * Note: The method suppresses errors to allow the application to function
-   * even if Elasticsearch is not available.
    */
   async setupElasticsearch() {
     try {
@@ -63,13 +49,6 @@ export class ElasticSearchService implements OnModuleInit {
 
   /**
    * Creates the index if it doesn't exist, with appropriate mapping for searches
-   *
-   * Sets up the Elasticsearch index with proper mappings optimized for order data:
-   * - Keyword fields for exact matching (IDs, status)
-   * - Text fields for full-text search
-   * - Nested mappings for order items
-   * - Date fields with appropriate formats
-   * - Custom analyzer settings
    */
   async createIndex() {
     const indexExists = await this.elasticsearchService.indices.exists({
@@ -81,24 +60,24 @@ export class ElasticSearchService implements OnModuleInit {
         index: this.indexName,
         mappings: {
           properties: {
-            id: { type: 'keyword' }, // For exact ID matching
-            status: { type: 'keyword' }, // For filtering by order status
-            total: { type: 'float' }, // For range queries on order total
-            createdAt: { type: 'date' }, // For date range filtering
-            updatedAt: { type: 'date' }, // For date range filtering
+            id: { type: 'keyword' },
+            status: { type: 'keyword' },
+            total: { type: 'float' },
+            createdAt: { type: 'date' },
+            updatedAt: { type: 'date' },
             items: {
-              type: 'nested', // Nested type for array of complex objects
+              type: 'nested',
               properties: {
                 id: { type: 'keyword' },
                 productId: { type: 'keyword' },
                 price: { type: 'float' },
                 quantity: { type: 'integer' },
                 product: {
-                  type: 'object', // Object type for product details
+                  type: 'object',
                   properties: {
                     id: { type: 'keyword' },
-                    name: { type: 'text', analyzer: 'standard' }, // For full-text search
-                    category: { type: 'keyword' }, // For category filtering
+                    name: { type: 'text', analyzer: 'standard' },
+                    category: { type: 'keyword' },
                   },
                 },
               },
@@ -106,13 +85,13 @@ export class ElasticSearchService implements OnModuleInit {
           },
         },
         settings: {
-          number_of_shards: 1, // Single shard for development
-          number_of_replicas: 0, // No replicas for development
+          number_of_shards: 1,
+          number_of_replicas: 0,
           analysis: {
             analyzer: {
               standard: {
                 type: 'standard',
-                stopwords: '_none_', // Don't filter out stopwords
+                stopwords: '_none_',
               },
             },
           },
@@ -125,11 +104,7 @@ export class ElasticSearchService implements OnModuleInit {
   /**
    * Checks the health status of the Elasticsearch cluster
    *
-   * Provides diagnostic information about the current state of the
-   * Elasticsearch cluster, including status (green, yellow, red).
-   *
    * @returns The health information from Elasticsearch
-   * @throws Error if the health check fails
    */
   async healthCheck() {
     try {
@@ -148,12 +123,7 @@ export class ElasticSearchService implements OnModuleInit {
   /**
    * Re-indexes all data from the database to Elasticsearch
    *
-   * Efficiently indexes a large number of entities using bulk operations
-   * when appropriate. For larger datasets, it splits the operation into
-   * batches to avoid memory issues and improve performance.
-   *
    * @param entities List of entities to be indexed
-   * @throws Error if the reindexing operation fails
    */
   async reindexAll(entities: any[]) {
     this.logger.log(
@@ -194,7 +164,7 @@ export class ElasticSearchService implements OnModuleInit {
     }
   }
 
-  // Repository delegate methods for API compatibility
+  // Repository delegate methods
 
   /**
    * Indexes a single document in Elasticsearch

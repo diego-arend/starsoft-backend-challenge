@@ -6,5 +6,5 @@ export interface ElasticsearchProduct {
   category?: string;
   createdAt?: string | Date;
   updatedAt?: string | Date;
-  [key: string]: any; // Para campos adicionais
+  [key: string]: any;
 }

@@ -5,22 +5,11 @@ import {
 
 /**
  * Application Prometheus metrics providers
- *
- * This array defines all the Prometheus metrics used throughout the application.
- * Each provider creates a metric that can be injected into services and controllers
- * using the @InjectMetric decorator from @willsoto/nestjs-prometheus.
  */
 export const metricsProviders = [
   /**
    * HTTP Requests Counter
-   *
-   * Tracks the total number of HTTP requests processed by the application.
-   * Labels allow segmentation by:
-   * - method: HTTP method (GET, POST, etc.)
-   * - path: Request URL path
-   * - statusCode: HTTP response status code
-   *
-   * Example Prometheus query: http_requests_total{method="GET",path="/health"}
+   * Tracks total HTTP requests with labels for method, path, and status code
    */
   makeCounterProvider({
     name: 'http_requests_total',
@@ -30,15 +19,7 @@ export const metricsProviders = [
 
   /**
    * HTTP Request Duration Histogram
-   *
-   * Measures the duration of HTTP requests in seconds.
-   * Histogram buckets are optimized for typical web API response times
-   * from 10ms to 5s, allowing percentile calculations.
-   *
-   * Labels match the HTTP requests counter for correlation.
-   *
-   * Example Prometheus query for 95th percentile:
-   * histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, path))
+   * Measures request duration in seconds with buckets optimized for API response times
    */
   makeHistogramProvider({
     name: 'http_request_duration_seconds',
@@ -49,15 +30,7 @@ export const metricsProviders = [
 
   /**
    * Application Events Counter
-   *
-   * Tracks business and operational events within the application.
-   * Labels allow segmentation by:
-   * - event: Type of event (e.g., 'order_created', 'payment_processed')
-   * - status: Outcome of the event ('success', 'failure', 'warning')
-   *
-   * Used by LoggerService to correlate logs with metrics.
-   *
-   * Example Prometheus query: sum(app_events_total{status="failure"}) by (event)
+   * Tracks business events by type and outcome
    */
   makeCounterProvider({
     name: 'app_events_total',
@@ -67,15 +40,7 @@ export const metricsProviders = [
 
   /**
    * Application Errors Counter
-   *
-   * Tracks errors that occur within the application.
-   * Labels allow segmentation by:
-   * - source: Component where the error occurred (e.g., 'database', 'elasticsearch')
-   * - errorType: Classification of the error (e.g., 'connection', 'timeout', 'validation')
-   *
-   * Used by LoggerService to provide error metrics for alerting.
-   *
-   * Example Prometheus query: sum(rate(app_errors_total[5m])) by (source)
+   * Tracks errors by source and type
    */
   makeCounterProvider({
     name: 'app_errors_total',

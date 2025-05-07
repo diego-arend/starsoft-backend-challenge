@@ -3,6 +3,9 @@ import { PrometheusModule } from '@willsoto/nestjs-prometheus';
 import { MetricsController } from './metrics.controller';
 import { metricsProviders } from './metrics.providers';
 
+/**
+ * Global module for application metrics
+ */
 @Global()
 @Module({
   imports: [

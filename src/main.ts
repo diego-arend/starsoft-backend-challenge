@@ -6,6 +6,7 @@ import initTracing from './tracing';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { getDataSourceToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { GlobalExceptionFilter } from './common/exceptions/exception.filter';
 
 // Initialize tracing before anything else
 initTracing();
@@ -19,6 +20,9 @@ async function bootstrap() {
   app.useGlobalInterceptors(metricsInterceptor);
 
   app.useGlobalPipes(new ValidationPipe());
+
+  // Apply global exception filter
+  app.useGlobalFilters(new GlobalExceptionFilter());
 
   // Simplified migration check
   try {

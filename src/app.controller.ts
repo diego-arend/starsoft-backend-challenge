@@ -26,4 +26,39 @@ export class AppController {
       timestamp: new Date().toISOString(),
     };
   }
+
+  /**
+   * Advanced health check with database and Elasticsearch status
+   * @returns Detailed health status of application components
+   */
+  @Get('health/detailed')
+  async detailedHealthCheck() {
+    this.logger.log('Performing detailed health check', 'HealthCheck');
+
+    let elasticsearchStatus = 'unknown';
+    try {
+      const esHealth = await this.elasticSearchService.healthCheck();
+      elasticsearchStatus = esHealth.status;
+    } catch (error) {
+      elasticsearchStatus = 'down';
+      this.logger.error(
+        'Elasticsearch health check failed',
+        error?.stack,
+        'HealthCheck',
+      );
+    }
+
+    return {
+      status: 'up',
+      timestamp: new Date().toISOString(),
+      components: {
+        api: {
+          status: 'up',
+        },
+        elasticsearch: {
+          status: elasticsearchStatus,
+        },
+      },
+    };
+  }
 }

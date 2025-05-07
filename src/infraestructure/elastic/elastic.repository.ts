@@ -4,9 +4,6 @@ import { ElasticsearchProduct } from './elastic.types';
 
 /**
  * Repository for Elasticsearch operations
- *
- * Handles low-level interactions with Elasticsearch such as indexing,
- * searching, updating, and deleting documents.
  */
 @Injectable()
 export class ElasticSearchRepository {
@@ -20,12 +17,8 @@ export class ElasticSearchRepository {
   /**
    * Indexes a document in Elasticsearch
    *
-   * Creates or updates a document in the Elasticsearch index.
-   * The document must contain an ID that will be used as the document identifier.
-   *
    * @param document Document to be indexed (must include an ID field)
-   * @returns Elasticsearch response with operation status
-   * @throws Error if the indexing operation fails
+   * @returns Elasticsearch response
    */
   async indexDocument(document: any) {
     try {
@@ -46,12 +39,9 @@ export class ElasticSearchRepository {
   /**
    * Performs a text search across indexed documents
    *
-   * Executes a multi-match query against specified fields in the Elasticsearch index.
-   *
    * @param query Search text to query
-   * @param fields Fields to search in (defaults to name, description, category)
+   * @param fields Fields to search in
    * @returns Array of products matching the search query
-   * @throws Error if the search operation fails
    */
   async search(
     query: string,
@@ -83,14 +73,8 @@ export class ElasticSearchRepository {
   /**
    * Searches using specific filters
    *
-   * Performs an advanced search with structured filters such as:
-   * - Exact match filters (e.g., category)
-   * - Range filters for numeric values (e.g., price min/max)
-   * - Date range filters (from/to dates)
-   *
    * @param filters Object containing filter criteria to apply
    * @returns Array of products matching the filter criteria
-   * @throws Error if the filtered search operation fails
    */
   async searchByFilters(
     filters: Record<string, any>,
@@ -148,13 +132,9 @@ export class ElasticSearchRepository {
   /**
    * Updates a document in the index
    *
-   * Applies a partial update to an existing document,
-   * only modifying the fields included in the document parameter.
-   *
    * @param id ID of the document to update
    * @param document Partial document with fields to update
-   * @returns Elasticsearch response with operation status
-   * @throws Error if the update operation fails
+   * @returns Elasticsearch response
    */
   async update(id: string, document: any) {
     try {
@@ -175,11 +155,8 @@ export class ElasticSearchRepository {
   /**
    * Removes a document from the index
    *
-   * Deletes a document from Elasticsearch based on its ID.
-   *
    * @param id ID of the document to remove
-   * @returns Elasticsearch response with operation status
-   * @throws Error if the delete operation fails
+   * @returns Elasticsearch response
    */
   async remove(id: string) {
     try {
@@ -199,12 +176,8 @@ export class ElasticSearchRepository {
   /**
    * Bulk indexes multiple documents
    *
-   * Efficiently indexes a batch of documents in a single operation.
-   * This is much more efficient than indexing documents one at a time.
-   *
    * @param documents Array of documents to index (each must include an ID)
    * @returns Elasticsearch bulk operation response
-   * @throws Error if the bulk indexing operation fails
    */
   async bulkIndex(documents: any[]) {
     try {

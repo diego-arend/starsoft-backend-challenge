@@ -9,6 +9,7 @@ import { APP_INTERCEPTOR } from '@nestjs/core';
 import { TraceIdInterceptor } from './interceptors/trace-id.interceptor';
 import { ElasticSearchModule } from './infraestructure/elastic/elastic.module';
 import { getTypeOrmConfig } from './infraestructure/postgress/dataSource';
+import { OrderModule } from './modules/order/order.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { getTypeOrmConfig } from './infraestructure/postgress/dataSource';
     MetricsModule,
     LoggerModule,
     ElasticSearchModule,
+    OrderModule,
   ],
   controllers: [AppController],
   providers: [

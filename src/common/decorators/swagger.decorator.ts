@@ -7,20 +7,24 @@ import {
   ApiParam,
 } from '@nestjs/swagger';
 
+/**
+ * Combines multiple Swagger decorators into a single decorator function
+ * @param docs Configuration object for Swagger documentation
+ */
 export function ApiDocumentation(docs: any) {
   const decorators = [];
 
-  // Adiciona ApiOperation
+  // Add ApiOperation
   if (docs.operation) {
     decorators.push(ApiOperation(docs.operation));
   }
 
-  // Adiciona ApiBody
+  // Add ApiBody
   if (docs.body) {
     decorators.push(ApiBody(docs.body));
   }
 
-  // Adiciona ApiParam(s)
+  // Add ApiParam(s) - supports array or single object
   if (docs.params) {
     if (Array.isArray(docs.params)) {
       docs.params.forEach((param) => {
@@ -31,7 +35,7 @@ export function ApiDocumentation(docs: any) {
     }
   }
 
-  // Adiciona ApiQuery - suporta array ou objeto único
+  // Add ApiQuery - supports array or single object
   if (docs.query) {
     if (Array.isArray(docs.query)) {
       docs.query.forEach((query) => {
@@ -42,7 +46,7 @@ export function ApiDocumentation(docs: any) {
     }
   }
 
-  // Adiciona ApiResponse(s)
+  // Add ApiResponse(s)
   if (docs.responses) {
     docs.responses.forEach((response) => {
       decorators.push(ApiResponse(response));

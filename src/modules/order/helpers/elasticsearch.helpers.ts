@@ -1,77 +1,80 @@
-import { Order, OrderStatus } from '../entities/order.entity';
+import { Order } from '../entities/order.entity';
 import { OrderItem } from '../entities/order-item.entity';
 import { OrderDocument } from '../interfaces/order-document.interface';
-import { SearchResponse } from '@elastic/elasticsearch/lib/api/types';
 
 /**
- * Converts Elasticsearch documents to Order entities
+ * Maps Elasticsearch search response to array of Order entities
  *
- * @param searchResponse Elasticsearch search response
+ * @param searchResponse The response from Elasticsearch search
  * @returns Array of Order entities
  */
-export function mapElasticsearchResponseToOrders(
-  searchResponse: SearchResponse<OrderDocument>,
-): Order[] {
-  const hits = searchResponse.hits.hits;
+export function mapElasticsearchResponseToOrders(searchResponse: any): Order[] {
+  return searchResponse.hits.hits.map((hit: any) => {
+    const source = hit._source;
+    const order = new Order();
 
-  if (hits.length === 0) {
-    return [];
-  }
+    order.uuid = source.uuid;
+    order.customerId = source.customerId;
+    order.status = source.status;
+    order.total = source.total;
+    order.createdAt = new Date(source.createdAt);
+    order.updatedAt = new Date(source.updatedAt);
 
-  // Convert Elasticsearch documents to Order objects
-  const orders = hits
-    .map((hit) => {
-      const orderData = hit._source;
-      if (!orderData) {
-        return null;
-      }
+    // Map items if they exist
+    if (source.items && Array.isArray(source.items)) {
+      order.items = source.items.map((item: any) => {
+        const orderItem = new OrderItem();
+        orderItem.uuid = item.uuid;
+        orderItem.productId = item.productId;
+        orderItem.productName = item.productName;
+        orderItem.price = item.price;
+        orderItem.quantity = item.quantity;
+        orderItem.subtotal = item.subtotal;
+        return orderItem;
+      });
+    } else {
+      order.items = [];
+    }
 
-      return createOrderFromDocument(orderData);
-    })
-    .filter((order): order is Order => order !== null);
-
-  return orders;
+    return order;
+  });
 }
 
 /**
- * Creates an Order entity from an Elasticsearch document
+ * Prepares a document for indexing/updating in Elasticsearch
  *
- * @param orderData Elasticsearch document
- * @returns Order entity
+ * @param order The order to be prepared
+ * @returns Document formatted for Elasticsearch
  */
-export function createOrderFromDocument(orderData: OrderDocument): Order {
-  // Create an Order object from Elasticsearch data
-  const order = new Order();
-  order.uuid = orderData.uuid;
-  order.customerId = orderData.customerId;
-  order.status = orderData.status as OrderStatus;
-  order.total = orderData.total;
-  order.createdAt = new Date(orderData.createdAt);
-  order.updatedAt = new Date(orderData.updatedAt);
-
-  // Process order items
-  if (orderData.items && Array.isArray(orderData.items)) {
-    order.items = orderData.items.map(createOrderItemFromDocument);
-  } else {
-    order.items = [];
-  }
-
-  return order;
+export function prepareOrderDocument(order: Order): OrderDocument {
+  return {
+    uuid: order.uuid,
+    customerId: order.customerId,
+    status: order.status,
+    total: order.total,
+    createdAt: order.createdAt.toISOString(), // Convertendo Date para string
+    updatedAt: order.updatedAt.toISOString(), // Convertendo Date para string
+    items: order.items.map((item) => ({
+      uuid: item.uuid,
+      productId: item.productId,
+      productName: item.productName,
+      price: item.price,
+      quantity: item.quantity,
+      subtotal: item.subtotal,
+    })),
+  };
 }
 
 /**
- * Creates an OrderItem entity from an Elasticsearch document
+ * Creates formatted error log message for Elasticsearch operations
  *
- * @param itemData Elasticsearch item document
- * @returns OrderItem entity
+ * @param operation The operation that failed
+ * @param error The error object
+ * @returns Formatted error message
  */
-export function createOrderItemFromDocument(itemData: any): OrderItem {
-  const orderItem = new OrderItem();
-  orderItem.uuid = itemData.uuid;
-  orderItem.productId = itemData.productId;
-  orderItem.productName = itemData.productName;
-  orderItem.price = itemData.price;
-  orderItem.quantity = itemData.quantity;
-  orderItem.subtotal = itemData.subtotal;
-  return orderItem;
+export function formatElasticsearchErrorMessage(
+  operation: string,
+  error: any,
+): string {
+  return `Failed to ${operation} in Elasticsearch: ${error.message}`;
 }

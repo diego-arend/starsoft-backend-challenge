@@ -7,6 +7,8 @@ import { LoggerService } from '../../logger/logger.service';
 import { OrderEventType } from './events/order-events.types';
 import { OrderElasticsearchService } from './services/order-elasticsearch.service';
 import { OrderPostgresService } from './services/order-postgres.service';
+import { emitOrderEvent } from './helpers/event.helpers';
+import { logOrderError } from './helpers/logger.helpers';
 
 /**
  * Main service that orchestrates order operations between data sources
@@ -32,7 +34,7 @@ export class OrderService {
       const order = await this.orderPostgresService.create(createOrderDto);
 
       // Emit event for Elasticsearch indexing
-      this.emitOrderEvent(OrderEventType.CREATED, order);
+      emitOrderEvent(this.eventEmitter, OrderEventType.CREATED, order);
 
       // Index in Elasticsearch non-blockingly
       this.orderElasticsearchService.indexOrder(order).catch((err) => {
@@ -44,7 +46,7 @@ export class OrderService {
 
       return order;
     } catch (error) {
-      this.logError('create', error);
+      logOrderError(this.logger, 'create', error);
       throw new BadRequestException('Failed to create order: ' + error.message);
     }
   }
@@ -119,11 +121,11 @@ export class OrderService {
       );
 
       // Emit event for Elasticsearch update
-      this.emitOrderEvent(OrderEventType.UPDATED, updatedOrder);
+      emitOrderEvent(this.eventEmitter, OrderEventType.UPDATED, updatedOrder);
 
       return updatedOrder;
     } catch (error) {
-      this.logError('update', error);
+      logOrderError(this.logger, 'update', error);
       throw new BadRequestException('Failed to update order: ' + error.message);
     }
   }
@@ -140,11 +142,11 @@ export class OrderService {
       const canceledOrder = await this.orderPostgresService.cancel(uuid);
 
       // Emit event for Elasticsearch update
-      this.emitOrderEvent(OrderEventType.CANCELED, canceledOrder);
+      emitOrderEvent(this.eventEmitter, OrderEventType.CANCELED, canceledOrder);
 
       return canceledOrder;
     } catch (error) {
-      this.logError('cancel', error);
+      logOrderError(this.logger, 'cancel', error);
       throw new BadRequestException('Failed to cancel order: ' + error.message);
     }
   }
@@ -168,33 +170,5 @@ export class OrderService {
 
       return this.orderPostgresService.findByCustomer(customerId);
     }
-  }
-
-  /**
-   * Emits an order event
-   *
-   * @param eventType Type of event
-   * @param order Order
-   */
-  private emitOrderEvent(eventType: OrderEventType, order: Order): void {
-    this.eventEmitter.emit(eventType, {
-      type: eventType,
-      orderUuid: order.uuid,
-      payload: order,
-    });
-  }
-
-  /**
-   * Logs an error
-   *
-   * @param operation Operation that failed
-   * @param error Error
-   */
-  private logError(operation: string, error: any): void {
-    this.logger.error(
-      `Failed to ${operation} order: ${error.message}`,
-      error.stack,
-      'OrderService',
-    );
   }
 }

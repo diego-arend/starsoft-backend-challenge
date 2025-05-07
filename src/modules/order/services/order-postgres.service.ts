@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, QueryRunner } from 'typeorm';
 import { Order, OrderStatus } from '../entities/order.entity';
 import { OrderItem } from '../entities/order-item.entity';
 import { CreateOrderDto } from '../dto/create-order.dto';
@@ -9,6 +9,8 @@ import { LoggerService } from '../../../logger/logger.service';
 import {
   createOrderItems,
   calculateOrderTotal,
+  canOrderBeModified,
+  formatErrorMessage,
 } from '../helpers/order.helpers';
 import {
   OrderNotFoundException,
@@ -133,38 +135,20 @@ export class OrderPostgresService {
    * @returns Updated order
    */
   async update(uuid: string, updateOrderDto: UpdateOrderDto): Promise<Order> {
+    // First find the order
+    const order = await this.findOneByUuid(uuid);
+
+    // Check if the order can be modified before proceeding
+    if (!canOrderBeModified(order)) {
+      throw new OrderNotModifiableException(order.status);
+    }
+
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
     try {
-      // Find the order by UUID
-      const order = await this.findOneByUuid(uuid);
-      this.validateOrderCanBeModified(order);
-
-      // Update items if provided
-      if (updateOrderDto.items && updateOrderDto.items.length > 0) {
-        await this.updateOrderItems(
-          queryRunner,
-          order.id,
-          updateOrderDto.items,
-        );
-      }
-
-      // Update status if provided
-      if (updateOrderDto.status) {
-        await queryRunner.manager.update(Order, order.id, {
-          status: updateOrderDto.status,
-        });
-      }
-
-      // Update customer if provided
-      if (updateOrderDto.customerId) {
-        await queryRunner.manager.update(Order, order.id, {
-          customerId: updateOrderDto.customerId,
-        });
-      }
-
+      await this.processOrderUpdate(queryRunner, order, updateOrderDto);
       await queryRunner.commitTransaction();
 
       // Fetch the complete updated order
@@ -187,7 +171,11 @@ export class OrderPostgresService {
   async cancel(uuid: string): Promise<Order> {
     // Find the order by UUID
     const order = await this.findOneByUuid(uuid);
-    this.validateOrderCanBeModified(order);
+
+    // Check if the order can be modified
+    if (!canOrderBeModified(order)) {
+      throw new OrderNotModifiableException(order.status);
+    }
 
     // Update status to CANCELED using numeric ID
     await this.orderRepository.update(order.id, {
@@ -213,6 +201,38 @@ export class OrderPostgresService {
   }
 
   /**
+   * Process order update with transaction
+   *
+   * @param queryRunner Active query runner
+   * @param order Original order
+   * @param updateOrderDto Update data
+   */
+  private async processOrderUpdate(
+    queryRunner: QueryRunner,
+    order: Order,
+    updateOrderDto: UpdateOrderDto,
+  ): Promise<void> {
+    // Update items if provided
+    if (updateOrderDto.items && updateOrderDto.items.length > 0) {
+      await this.updateOrderItems(queryRunner, order.id, updateOrderDto.items);
+    }
+
+    // Update status if provided
+    if (updateOrderDto.status) {
+      await queryRunner.manager.update(Order, order.id, {
+        status: updateOrderDto.status,
+      });
+    }
+
+    // Update customer if provided
+    if (updateOrderDto.customerId) {
+      await queryRunner.manager.update(Order, order.id, {
+        customerId: updateOrderDto.customerId,
+      });
+    }
+  }
+
+  /**
    * Updates the items of an order
    *
    * @param queryRunner Current query runner
@@ -220,7 +240,7 @@ export class OrderPostgresService {
    * @param items New items
    */
   private async updateOrderItems(
-    queryRunner: any,
+    queryRunner: QueryRunner,
     orderId: number,
     items: any[],
   ): Promise<void> {
@@ -239,21 +259,6 @@ export class OrderPostgresService {
   }
 
   /**
-   * Verifies if an order can be modified
-   *
-   * @param order Order to be verified
-   * @throws OrderNotModifiableException if the order cannot be modified
-   */
-  private validateOrderCanBeModified(order: Order): void {
-    if (
-      order.status === OrderStatus.DELIVERED ||
-      order.status === OrderStatus.CANCELED
-    ) {
-      throw new OrderNotModifiableException(order.status);
-    }
-  }
-
-  /**
    * Logs an error
    *
    * @param operation Operation that failed
@@ -261,7 +266,7 @@ export class OrderPostgresService {
    */
   private logError(operation: string, error: any): void {
     this.logger.error(
-      `Failed to ${operation} order in PostgreSQL: ${error.message}`,
+      formatErrorMessage(operation, error),
       error.stack,
       'OrderPostgresService',
     );

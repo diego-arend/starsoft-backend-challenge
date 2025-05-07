@@ -3,8 +3,13 @@ import { ElasticsearchService } from '@nestjs/elasticsearch';
 import { LoggerService } from '../../../logger/logger.service';
 import { Order } from '../entities/order.entity';
 import { OrderDocument } from '../interfaces/order-document.interface';
-import { mapElasticsearchResponseToOrders } from '../helpers/elasticsearch.helpers';
+import {
+  mapElasticsearchResponseToOrders,
+  prepareOrderDocument,
+  formatElasticsearchErrorMessage,
+} from '../helpers/elasticsearch.helpers';
 import { ElasticsearchSearchException } from '../exceptions/elasticsearch-exceptions';
+import { OrderReconciliationService } from './order-reconciliation.service';
 
 /**
  * Service for handling Elasticsearch operations related to orders
@@ -16,6 +21,7 @@ export class OrderElasticsearchService {
   constructor(
     private readonly elasticsearchService: ElasticsearchService,
     private readonly logger: LoggerService,
+    private readonly reconciliationService: OrderReconciliationService,
   ) {}
 
   //---------------------------------------------
@@ -29,7 +35,7 @@ export class OrderElasticsearchService {
    */
   async indexOrder(order: Order): Promise<void> {
     try {
-      const orderDocument = this.prepareOrderDocument(order);
+      const orderDocument = prepareOrderDocument(order);
 
       await this.elasticsearchService.index({
         index: this.indexName,
@@ -43,12 +49,12 @@ export class OrderElasticsearchService {
       );
     } catch (error) {
       this.logger.error(
-        `Failed to index order in Elasticsearch: ${error.message}`,
+        formatElasticsearchErrorMessage('index order', error),
         error.stack,
         'OrderElasticsearchService',
       );
 
-      this.recordFailedOperation('index', order.uuid);
+      this.reconciliationService.recordFailedOperation('index', order.uuid);
     }
   }
 
@@ -59,7 +65,7 @@ export class OrderElasticsearchService {
    */
   async updateOrder(order: Order): Promise<void> {
     try {
-      const orderDocument = this.prepareOrderDocument(order);
+      const orderDocument = prepareOrderDocument(order);
       const exists = await this.elasticsearchService.exists({
         index: this.indexName,
         id: order.uuid,
@@ -81,12 +87,12 @@ export class OrderElasticsearchService {
       }
     } catch (error) {
       this.logger.error(
-        `Failed to update order in Elasticsearch: ${error.message}`,
+        formatElasticsearchErrorMessage('update order', error),
         error.stack,
         'OrderElasticsearchService',
       );
 
-      this.recordFailedOperation('update', order.uuid);
+      this.reconciliationService.recordFailedOperation('update', order.uuid);
     }
   }
 
@@ -108,12 +114,12 @@ export class OrderElasticsearchService {
       );
     } catch (error) {
       this.logger.error(
-        `Failed to remove order from Elasticsearch: ${error.message}`,
+        formatElasticsearchErrorMessage('remove order', error),
         error.stack,
         'OrderElasticsearchService',
       );
 
-      this.recordFailedOperation('delete', orderUuid);
+      this.reconciliationService.recordFailedOperation('delete', orderUuid);
     }
   }
 
@@ -138,7 +144,7 @@ export class OrderElasticsearchService {
       return mapElasticsearchResponseToOrders(searchResponse);
     } catch (error) {
       this.logger.error(
-        `Failed to fetch orders from Elasticsearch: ${error.message}`,
+        formatElasticsearchErrorMessage('fetch all orders', error),
         error.stack,
         'OrderElasticsearchService',
       );
@@ -169,7 +175,10 @@ export class OrderElasticsearchService {
       return mapElasticsearchResponseToOrders(searchResponse);
     } catch (error) {
       this.logger.error(
-        `Failed to fetch customer orders from Elasticsearch: ${error.message}`,
+        formatElasticsearchErrorMessage(
+          `fetch customer ${customerId} orders`,
+          error,
+        ),
         error.stack,
         'OrderElasticsearchService',
       );
@@ -202,7 +211,7 @@ export class OrderElasticsearchService {
       return orders.length > 0 ? orders[0] : null;
     } catch (error) {
       this.logger.error(
-        `Failed to fetch order from Elasticsearch: ${error.message}`,
+        formatElasticsearchErrorMessage(`fetch order ${uuid}`, error),
         error.stack,
         'OrderElasticsearchService',
       );
@@ -226,57 +235,12 @@ export class OrderElasticsearchService {
       return response.hits;
     } catch (error) {
       this.logger.error(
-        `Failed to search orders in Elasticsearch: ${error.message}`,
+        formatElasticsearchErrorMessage('search orders', error),
         error.stack,
         'OrderElasticsearchService',
       );
 
       throw error; // Propagate error as this is a primary read operation
     }
-  }
-
-  //---------------------------------------------
-  // Helper methods
-  //---------------------------------------------
-
-  /**
-   * Prepares a document for indexing/updating in Elasticsearch
-   *
-   * @param order The order to be prepared
-   * @returns Document formatted for Elasticsearch
-   */
-  private prepareOrderDocument(order: Order): any {
-    return {
-      uuid: order.uuid,
-      customerId: order.customerId,
-      status: order.status,
-      total: order.total,
-      createdAt: order.createdAt,
-      updatedAt: order.updatedAt,
-      items: order.items.map((item) => ({
-        uuid: item.uuid,
-        productId: item.productId,
-        productName: item.productName,
-        price: item.price,
-        quantity: item.quantity,
-        subtotal: item.subtotal,
-      })),
-    };
-  }
-
-  /**
-   * Records failed Elasticsearch operations for later reconciliation
-   *
-   * @param operation Type of failed operation (index/update/delete)
-   * @param orderUuid UUID of the problematic order
-   */
-  private recordFailedOperation(operation: string, orderUuid: string): void {
-    // In a real implementation, this would save failed operations
-    // in a reconciliation table for later processing
-
-    this.logger.warn(
-      `Recorded failed Elasticsearch ${operation} operation for order ${orderUuid}`,
-      'OrderElasticsearchService',
-    );
   }
 }

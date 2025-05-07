@@ -1,5 +1,6 @@
 import { OrderItemDto } from '../dto/order-item.dto';
 import { OrderItem } from '../entities/order-item.entity';
+import { Order, OrderStatus } from '../entities/order.entity';
 
 /**
  * Calculates the total order amount based on items
@@ -67,4 +68,25 @@ export function validateOrderItems(items: OrderItemDto[]): string[] {
   });
 
   return errors;
+}
+
+/**
+ * Checks if an order can be modified based on its status
+ *
+ * @param order Order to check
+ * @returns True if the order can be modified, false otherwise
+ */
+export function canOrderBeModified(order: Order): boolean {
+  return ![OrderStatus.DELIVERED, OrderStatus.CANCELED].includes(order.status);
+}
+
+/**
+ * Formats an error message for logging purposes
+ *
+ * @param operation The operation that failed
+ * @param error The error object
+ * @returns Formatted error message
+ */
+export function formatErrorMessage(operation: string, error: any): string {
+  return `Failed to ${operation} order in PostgreSQL: ${error.message}`;
 }

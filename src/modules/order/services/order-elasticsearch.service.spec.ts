@@ -1,3 +1,4 @@
+import { Test, TestingModule } from '@nestjs/testing';
 import { ElasticsearchService } from '@nestjs/elasticsearch';
 import { LoggerService } from '../../../logger/logger.service';
 import { OrderElasticsearchService } from './order-elasticsearch.service';
@@ -13,7 +14,6 @@ import {
 } from '../test/elasticsearch-test.providers';
 import { ElasticsearchSearchException } from '../exceptions/elasticsearch-exceptions';
 import { createMockReconciliationService } from '../test/reconciliation-test.providers';
-import { configureTestModule } from '../test/test-module.helpers';
 
 describe('OrderElasticsearchService', () => {
   let service: OrderElasticsearchService;
@@ -26,21 +26,23 @@ describe('OrderElasticsearchService', () => {
     const loggerServiceMock = createMockLoggerService();
     const reconciliationServiceMock = createMockReconciliationService();
 
-    const module = await configureTestModule([
-      OrderElasticsearchService,
-      {
-        provide: ElasticsearchService,
-        useValue: elasticsearchServiceMock,
-      },
-      {
-        provide: LoggerService,
-        useValue: loggerServiceMock,
-      },
-      {
-        provide: OrderReconciliationService,
-        useValue: reconciliationServiceMock,
-      },
-    ]).compile();
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        OrderElasticsearchService,
+        {
+          provide: ElasticsearchService,
+          useValue: elasticsearchServiceMock,
+        },
+        {
+          provide: LoggerService,
+          useValue: loggerServiceMock,
+        },
+        {
+          provide: OrderReconciliationService,
+          useValue: reconciliationServiceMock,
+        },
+      ],
+    }).compile();
 
     service = module.get<OrderElasticsearchService>(OrderElasticsearchService);
     elasticsearchService =
@@ -78,10 +80,11 @@ describe('OrderElasticsearchService', () => {
       await service.indexOrder(order);
 
       expect(loggerService.error).toHaveBeenCalled();
-      // Test for the reconciliation service call
+      // Atualizar expectativa para incluir o terceiro parâmetro
       expect(reconciliationService.recordFailedOperation).toHaveBeenCalledWith(
         'index',
         order.uuid,
+        expect.any(String), // Aceita qualquer string como mensagem de erro
       );
     });
   });
@@ -276,9 +279,60 @@ describe('OrderElasticsearchService', () => {
 
       await service.updateOrder(order);
 
+      // Atualizar expectativa para incluir o terceiro parâmetro
       expect(reconciliationService.recordFailedOperation).toHaveBeenCalledWith(
         'update',
         order.uuid,
+        expect.any(String), // Aceita qualquer string como mensagem de erro
+      );
+    });
+  });
+
+  // Adicionar testes para verificar integração com o serviço de reconciliação
+  describe('reconciliation integration', () => {
+    it('should record failed operation when indexing fails', async () => {
+      const order = createSampleOrder();
+      jest
+        .spyOn(elasticsearchService, 'index')
+        .mockRejectedValue(new Error('Index failed'));
+
+      await service.indexOrder(order);
+
+      expect(reconciliationService.recordFailedOperation).toHaveBeenCalledWith(
+        'index',
+        order.uuid,
+        expect.any(String),
+      );
+    });
+
+    it('should record failed operation when update fails', async () => {
+      const order = createSampleOrder();
+      jest.spyOn(elasticsearchService, 'exists').mockResolvedValue(true);
+      jest
+        .spyOn(elasticsearchService, 'update')
+        .mockRejectedValue(new Error('Update failed'));
+
+      await service.updateOrder(order);
+
+      expect(reconciliationService.recordFailedOperation).toHaveBeenCalledWith(
+        'update',
+        order.uuid,
+        expect.any(String),
+      );
+    });
+
+    it('should record failed operation when removal fails', async () => {
+      const orderUuid = '123e4567-e89b-12d3-a456-426614174000';
+      jest
+        .spyOn(elasticsearchService, 'delete')
+        .mockRejectedValue(new Error('Delete failed'));
+
+      await service.removeOrder(orderUuid);
+
+      expect(reconciliationService.recordFailedOperation).toHaveBeenCalledWith(
+        'delete',
+        orderUuid,
+        expect.any(String),
       );
     });
   });

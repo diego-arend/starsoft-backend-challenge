@@ -2,14 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { ElasticsearchService } from '@nestjs/elasticsearch';
 import { LoggerService } from '../../../logger/logger.service';
 import { Order } from '../entities/order.entity';
-import { OrderDocument } from '../interfaces/order-document.interface';
 import {
+  formatElasticsearchErrorMessage,
   mapElasticsearchResponseToOrders,
   prepareOrderDocument,
-  formatElasticsearchErrorMessage,
 } from '../helpers/elasticsearch.helpers';
 import { ElasticsearchSearchException } from '../exceptions/elasticsearch-exceptions';
 import { OrderReconciliationService } from './order-reconciliation.service';
+import { OrderDocument } from '../interfaces/order-document.interface';
 
 /**
  * Service for handling Elasticsearch operations related to orders
@@ -48,13 +48,18 @@ export class OrderElasticsearchService {
         'OrderElasticsearchService',
       );
     } catch (error) {
-      this.logger.error(
-        formatElasticsearchErrorMessage('index order', error),
-        error.stack,
-        'OrderElasticsearchService',
+      const errorMessage = formatElasticsearchErrorMessage(
+        'index order',
+        error,
       );
+      this.logger.error(errorMessage, error.stack, 'OrderElasticsearchService');
 
-      this.reconciliationService.recordFailedOperation('index', order.uuid);
+      // Record the failed operation for later reconciliation
+      await this.reconciliationService.recordFailedOperation(
+        'index',
+        order.uuid,
+        error.message,
+      );
     }
   }
 
@@ -86,13 +91,18 @@ export class OrderElasticsearchService {
         await this.indexOrder(order);
       }
     } catch (error) {
-      this.logger.error(
-        formatElasticsearchErrorMessage('update order', error),
-        error.stack,
-        'OrderElasticsearchService',
+      const errorMessage = formatElasticsearchErrorMessage(
+        'update order',
+        error,
       );
+      this.logger.error(errorMessage, error.stack, 'OrderElasticsearchService');
 
-      this.reconciliationService.recordFailedOperation('update', order.uuid);
+      // Record the failed operation for later reconciliation
+      await this.reconciliationService.recordFailedOperation(
+        'update',
+        order.uuid,
+        error.message,
+      );
     }
   }
 
@@ -113,13 +123,18 @@ export class OrderElasticsearchService {
         'OrderElasticsearchService',
       );
     } catch (error) {
-      this.logger.error(
-        formatElasticsearchErrorMessage('remove order', error),
-        error.stack,
-        'OrderElasticsearchService',
+      const errorMessage = formatElasticsearchErrorMessage(
+        'remove order',
+        error,
       );
+      this.logger.error(errorMessage, error.stack, 'OrderElasticsearchService');
 
-      this.reconciliationService.recordFailedOperation('delete', orderUuid);
+      // Record the failed operation for later reconciliation
+      await this.reconciliationService.recordFailedOperation(
+        'delete',
+        orderUuid,
+        error.message,
+      );
     }
   }
 

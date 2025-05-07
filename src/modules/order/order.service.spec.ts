@@ -94,7 +94,7 @@ describe('OrderService', () => {
         OrderEventType.CREATED,
         expect.objectContaining({ orderUuid: sampleOrder.uuid }),
       );
-      expect(elasticsearchService.indexOrder).toHaveBeenCalled();
+      expect(elasticsearchService.indexOrder).not.toHaveBeenCalled();
       expect(result).toBe(sampleOrder);
     });
 
@@ -179,6 +179,57 @@ describe('OrderService', () => {
       expect(postgresService.findOneByUuid).toHaveBeenCalled();
     });
 
+    it('should try to use Elasticsearch first for findOne using findOneByUuid', async () => {
+      const id = 1;
+      const pgOrder = { ...sampleOrder, id };
+      const esOrder = {
+        ...pgOrder,
+        // Use a property that exists on Order instead of enrichedData
+        items: [
+          ...(pgOrder.items || []),
+          { id: 999, productName: 'Extra item from ES' },
+        ],
+      };
+
+      jest.spyOn(postgresService, 'findOne').mockResolvedValue(pgOrder);
+      jest
+        .spyOn(elasticsearchService, 'findOneByUuid')
+        .mockResolvedValue(esOrder);
+
+      const result = await service.findOne(id);
+
+      expect(postgresService.findOne).toHaveBeenCalledWith(id);
+      expect(elasticsearchService.findOneByUuid).toHaveBeenCalledWith(
+        pgOrder.uuid,
+      );
+      // Check for the additional item instead of enrichedData
+      expect(result.items).toContainEqual(
+        expect.objectContaining({
+          id: 999,
+          productName: 'Extra item from ES',
+        }),
+      );
+    });
+
+    it('should fall back to PostgreSQL result when Elasticsearch fails for findOne', async () => {
+      const id = 1;
+      const pgOrder = { ...sampleOrder, id };
+
+      jest.spyOn(postgresService, 'findOne').mockResolvedValue(pgOrder);
+      jest
+        .spyOn(elasticsearchService, 'findOneByUuid')
+        .mockRejectedValue(new Error('ES unavailable'));
+
+      const result = await service.findOne(id);
+
+      expect(postgresService.findOne).toHaveBeenCalledWith(id);
+      expect(elasticsearchService.findOneByUuid).toHaveBeenCalledWith(
+        pgOrder.uuid,
+      );
+      expect(result).toBe(pgOrder);
+      expect(loggerService.debug).toHaveBeenCalled();
+    });
+
     it('should prioritize Elasticsearch for findByCustomer with database fallback', async () => {
       const customerId = '550e8400-e29b-41d4-a716-446655440000';
       const orders = [sampleOrder, sampleOrder];
@@ -200,16 +251,6 @@ describe('OrderService', () => {
       result = await service.findByCustomer(customerId);
       expect(postgresService.findByCustomer).toHaveBeenCalled();
       expect(result).toBe(orders);
-    });
-
-    it('should fetch order by ID directly from PostgreSQL', async () => {
-      const id = 1;
-      jest.spyOn(postgresService, 'findOne').mockResolvedValue(sampleOrder);
-
-      const result = await service.findOne(id);
-
-      expect(postgresService.findOne).toHaveBeenCalledWith(id);
-      expect(result).toBe(sampleOrder);
     });
   });
 
@@ -244,21 +285,6 @@ describe('OrderService', () => {
 
       expect(loggerService.error).toHaveBeenCalledTimes(3);
     });
-
-    it('should not fail main operation when background indexing fails', async () => {
-      const dto = createSampleCreateOrderDto();
-      jest.spyOn(postgresService, 'create').mockResolvedValue(sampleOrder);
-
-      jest
-        .spyOn(elasticsearchService, 'indexOrder')
-        .mockImplementation(() => Promise.reject(new Error('Index error')));
-
-      const result = await service.create(dto);
-      expect(result).toBe(sampleOrder);
-
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      expect(loggerService.error).toHaveBeenCalled();
-    });
   });
 
   describe('Event emission', () => {
@@ -270,6 +296,17 @@ describe('OrderService', () => {
         orderUuid: sampleOrder.uuid,
         payload: sampleOrder,
       });
+    });
+
+    it('should not emit events if PostgreSQL operation fails', async () => {
+      const dto = createSampleCreateOrderDto();
+      const error = new Error('Database error');
+
+      jest.spyOn(postgresService, 'create').mockRejectedValue(error);
+
+      await expect(service.create(dto)).rejects.toThrow(BadRequestException);
+
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
     });
   });
 });

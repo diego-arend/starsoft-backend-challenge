@@ -5,7 +5,7 @@
  */
 export function createMockReconciliationService() {
   return {
-    recordFailedOperation: jest.fn(),
-    processFailedOperations: jest.fn(),
+    recordFailedOperation: jest.fn().mockResolvedValue(undefined),
+    processFailedOperations: jest.fn().mockResolvedValue(undefined),
   };
 }

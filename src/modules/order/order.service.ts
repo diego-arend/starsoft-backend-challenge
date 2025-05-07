@@ -33,16 +33,9 @@ export class OrderService {
       // Create order in PostgreSQL
       const order = await this.orderPostgresService.create(createOrderDto);
 
-      // Emit event for Elasticsearch indexing
+      // Emit event for Elasticsearch indexing through listener
+      // Only emit event if PostgreSQL operation was successful
       emitOrderEvent(this.eventEmitter, OrderEventType.CREATED, order);
-
-      // Index in Elasticsearch non-blockingly
-      this.orderElasticsearchService.indexOrder(order).catch((err) => {
-        this.logger.error(
-          `Background indexing failed: ${err.message}`,
-          err.stack,
-        );
-      });
 
       return order;
     } catch (error) {
@@ -77,7 +70,33 @@ export class OrderService {
    * @returns The order with its items
    */
   async findOne(id: number): Promise<Order> {
-    return this.orderPostgresService.findOne(id);
+    try {
+      // First get the order from PostgreSQL to get the UUID
+      const pgOrder = await this.orderPostgresService.findOne(id);
+
+      // Then try to get the full details from Elasticsearch using the UUID
+      try {
+        const esOrder = await this.orderElasticsearchService.findOneByUuid(
+          pgOrder.uuid,
+        );
+        if (esOrder) {
+          return esOrder;
+        }
+      } catch (error) {
+        // Silently fail and continue with the PostgreSQL result
+        this.logger.debug(
+          `Elasticsearch query failed for UUID ${pgOrder.uuid}, using PostgreSQL result: ${error.message}`,
+          'OrderService',
+        );
+      }
+
+      // Return the PostgreSQL result if Elasticsearch failed or didn't have the data
+      return pgOrder;
+    } catch (error) {
+      // If PostgreSQL query fails, propagate the error
+      logOrderError(this.logger, 'findOne', error);
+      throw error;
+    }
   }
 
   /**

@@ -1,41 +1,97 @@
 import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { LoggerService } from '../../../logger/logger.service';
+import { OrderReconciliation } from '../entities/order-reconciliation.entity';
+import {
+  ReconciliationOperationType,
+  ReconciliationStatus,
+} from '../types/reconciliation-types';
 
 /**
  * Service for handling reconciliation of failed Elasticsearch operations
  */
 @Injectable()
 export class OrderReconciliationService {
-  constructor(private readonly logger: LoggerService) {}
+  constructor(
+    @InjectRepository(OrderReconciliation)
+    private readonly reconciliationRepository: Repository<OrderReconciliation>,
+    private readonly logger: LoggerService,
+  ) {}
 
   /**
    * Records failed Elasticsearch operations for later reconciliation
    *
-   * @param operation Type of failed operation (index/update/delete)
-   * @param orderUuid UUID of the problematic order
+   * @param operation - Type of failed operation (index/update/delete)
+   * @param orderUuid - UUID of the problematic order
+   * @param errorMessage - Optional error message detailing the failure
    */
-  recordFailedOperation(operation: string, orderUuid: string): void {
-    // In a real implementation, this would save failed operations
-    // in a reconciliation table for later processing
+  async recordFailedOperation(
+    operation: string,
+    orderUuid: string,
+    errorMessage: string = '',
+  ): Promise<void> {
+    try {
+      // Map the string operation type to enum
+      const operationType = this.mapOperationTypeString(operation);
 
-    this.logger.warn(
-      `Recorded failed Elasticsearch ${operation} operation for order ${orderUuid}`,
-      'OrderReconciliationService',
-    );
+      // Create a new reconciliation record
+      const reconciliationRecord = new OrderReconciliation();
+      reconciliationRecord.orderUuid = orderUuid;
+      reconciliationRecord.operationType = operationType;
+      reconciliationRecord.status = ReconciliationStatus.PENDING;
+      reconciliationRecord.errorMessage = errorMessage;
+
+      // Save the record to the database
+      await this.reconciliationRepository.save(reconciliationRecord);
+
+      this.logger.warn(
+        `Recorded failed Elasticsearch ${operation} operation for order ${orderUuid}`,
+        'OrderReconciliationService',
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to record reconciliation operation: ${error.message}`,
+        error.stack,
+        'OrderReconciliationService',
+      );
+    }
   }
 
   /**
-   * Processes all failed operations
-   * In a real implementation, this would be scheduled to run periodically
+   * Maps string operation type to enum value
+   *
+   * @param operation - String representation of operation
+   * @returns Corresponding enum value
+   */
+  private mapOperationTypeString(
+    operation: string,
+  ): ReconciliationOperationType {
+    const operationLower = operation.toLowerCase();
+
+    if (operationLower === 'index') {
+      return ReconciliationOperationType.INDEX;
+    } else if (operationLower === 'update') {
+      return ReconciliationOperationType.UPDATE;
+    } else if (operationLower === 'delete') {
+      return ReconciliationOperationType.DELETE;
+    }
+
+    // Default to INDEX if operation is not recognized
+    this.logger.warn(
+      `Unrecognized operation type: ${operation}, defaulting to INDEX`,
+      'OrderReconciliationService',
+    );
+    return ReconciliationOperationType.INDEX;
+  }
+
+  /**
+   * Method that only logs a message about processing operations
+   * This is a placeholder for future implementation
    */
   async processFailedOperations(): Promise<void> {
-    // Implementation would:
-    // 1. Fetch all failed operations from storage
-    // 2. Attempt to retry them
-    // 3. Update reconciliation status
-
     this.logger.log(
-      'Processing failed Elasticsearch operations',
+      'Processing failed Elasticsearch operations (not implemented yet)',
       'OrderReconciliationService',
     );
   }

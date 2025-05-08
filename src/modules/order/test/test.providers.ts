@@ -3,7 +3,7 @@ import { OrderItem } from '../entities/order-item.entity';
 
 /**
  * Creates a mock Logger service for testing purposes
- * 
+ *
  * @returns {object} A mock implementation of LoggerService with Jest spy functions
  */
 export const createMockLoggerService = () => ({
@@ -17,13 +17,13 @@ export const createMockLoggerService = () => ({
 
 /**
  * Creates a fully populated Order entity with associated OrderItems for testing
- * 
+ *
  * The returned order has:
  * - Complete order metadata (ID, UUID, dates, status)
  * - Customer information
  * - Two order items with different products
  * - Correctly calculated subtotals and total
- * 
+ *
  * @returns {Order} A complete Order entity with items
  */
 export const createSampleOrder = (): Order => {

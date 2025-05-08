@@ -40,14 +40,13 @@
 ### Estratégia de Armazenamento e Consulta para o sistema de Order
 
 - **Fonte Primária vs. Consulta Rápida**: O PostgreSQL é utilizado como fonte primária de dados (single source of truth), enquanto o Elasticsearch é otimizado para consultas rápidas e flexíveis.
-  
 - **Métodos de Escrita (create/update/cancel)**:
   - Sempre operam primeiro no PostgreSQL como fonte primária
   - Após sucesso da operação no PostgreSQL, emitem eventos para processamento assíncrono
   - O listener de eventos processa a indexação no Elasticsearch
   - Este modelo assíncrono permite que a API responda rapidamente sem aguardar a indexação
-  
 - **Métodos de Leitura (find/search)**:
+
   - Tentam primeiro buscar dados no Elasticsearch para melhor performance
   - Usam o PostgreSQL como fallback automático caso o Elasticsearch falhe ou esteja indisponível
   - Esta estratégia garante disponibilidade mesmo quando o Elasticsearch apresenta problemas
@@ -72,7 +71,7 @@
 
 ### Métodos auxiliares ao CRUD
 
-  - Foram criados os métodos findByCustomer, findOneByUuid como métodos administrativos auxiliares ao CRUD, pensando e um cenário de equipes de suporte.
+- Foram criados os métodos findByCustomer, findOneByUuid como métodos administrativos auxiliares ao CRUD, pensando e um cenário de equipes de suporte.
 
 ## Estrutura da Aplicação
 
@@ -111,6 +110,14 @@ src/
 │   └── metrics.providers.ts          # Provedores de métricas para Prometheus
 │
 ├── modules/                          # Módulos da aplicação organizados por domínio
+|    └── search/
+|        ├── dto/
+|        │   └── search-query.dto.ts
+|        ├── interfaces/
+|        │   └── search-result.interface.ts
+|        ├── search.controller.ts
+|        ├── search.module.ts
+|        └── search.service.ts
 │   └── order/                        # Módulo principal de pedidos
 │       ├── dto/                      # Objetos de transferência de dados
 │       │   ├── create-order.dto.ts   # DTO para criação de pedido

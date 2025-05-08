@@ -54,7 +54,12 @@ export class ElasticsearchInterceptor implements NestInterceptor {
    * Determines if an entity should be indexed in Elasticsearch
    */
   private shouldIndex(data: any): boolean {
-    // Simple check: verify if it has typical Product properties
-    return !!(data.name && data.price !== undefined);
+    // Check if data exists first before accessing properties
+    return (
+      data &&
+      typeof data === 'object' &&
+      typeof data.name === 'string' &&
+      data.price !== undefined
+    );
   }
 }

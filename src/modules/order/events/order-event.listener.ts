@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { OrderEventType, OrderEvent } from './order-events.types';
+import { OrderEventType, OrderEvent } from '../types/order-events.types';
 import { LoggerService } from '../../../logger/logger.service';
 import { ElasticsearchService } from '@nestjs/elasticsearch';
 import { Order } from '../entities/order.entity';

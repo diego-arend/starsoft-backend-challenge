@@ -122,3 +122,67 @@ export const createSearchErrorResponse = () => {
     throw new Error('Elasticsearch search error');
   };
 };
+
+/**
+ * Creates a sample Elasticsearch search response with order data
+ *
+ * @returns An Elasticsearch search response with sample orders
+ */
+export function createSampleElasticsearchResponse(): any {
+  return {
+    hits: {
+      hits: [
+        {
+          _id: '1',
+          _source: {
+            uuid: 'order-1',
+            customerId: 'customer-123',
+            status: OrderStatus.PENDING,
+            total: 3000,
+            createdAt: '2023-01-01T00:00:00.000Z',
+            updatedAt: '2023-01-02T00:00:00.000Z',
+            items: [
+              {
+                uuid: 'item-1',
+                productId: 'product-1',
+                productName: 'Product One',
+                price: 1000,
+                quantity: 2,
+                subtotal: 2000,
+              },
+              {
+                uuid: 'item-2',
+                productId: 'product-2',
+                productName: 'Product Two',
+                price: 500,
+                quantity: 2,
+                subtotal: 1000,
+              },
+            ],
+          },
+        },
+        {
+          _id: '2',
+          _source: {
+            uuid: 'order-2',
+            customerId: 'customer-456',
+            status: OrderStatus.PROCESSING,
+            total: 1500,
+            createdAt: '2023-02-01T00:00:00.000Z',
+            updatedAt: '2023-02-02T00:00:00.000Z',
+            items: [
+              {
+                uuid: 'item-3',
+                productId: 'product-3',
+                productName: 'Product Three',
+                price: 1500,
+                quantity: 1,
+                subtotal: 1500,
+              },
+            ],
+          },
+        },
+      ],
+    },
+  };
+}

@@ -5,6 +5,9 @@ import { ElasticsearchService } from '@nestjs/elasticsearch';
 import { mockOrders, mockOrder } from '../../test/mocks/order.mock';
 import { OrderStatus } from '../order/entities/order.entity';
 import { NotFoundException } from '@nestjs/common';
+import { PaginationDto } from '../../common/dto/pagination.dto';
+import { PaginationService } from '../../common/services/pagination.service';
+import { createTestPagination } from '../../test/utils/test.utils';
 
 describe('SearchController', () => {
   let controller: SearchController;
@@ -38,6 +41,24 @@ describe('SearchController', () => {
             delete: jest.fn().mockResolvedValue({}),
           }),
         },
+        {
+          provide: PaginationService,
+          useValue: {
+            getPaginationParams: jest.fn().mockImplementation((dto) => ({
+              page: dto?.page || 1,
+              limit: dto?.limit || 10,
+              skip: (dto?.page - 1 || 0) * (dto?.limit || 10),
+            })),
+            getElasticsearchPaginationParams: jest
+              .fn()
+              .mockImplementation((dto) => ({
+                from: dto?.page ? (dto.page - 1) * (dto.limit || 10) : 0,
+                size: dto?.limit || 10,
+                page: dto?.page || 1,
+                limit: dto?.limit || 10,
+              })),
+          },
+        },
       ],
     }).compile();
 
@@ -52,7 +73,6 @@ describe('SearchController', () => {
   describe('findByUuid', () => {
     it('should return an order when found', async () => {
       const uuid = mockOrder.uuid;
-      // Usar type assertion para evitar erro de tipo
       jest.spyOn(service, 'findByUuid').mockResolvedValue(mockOrder as any);
 
       const result = await controller.findByUuid(uuid);
@@ -78,23 +98,18 @@ describe('SearchController', () => {
   describe('findByStatus', () => {
     it('should return orders with specified status', async () => {
       const status = OrderStatus.DELIVERED;
-      const page = 1;
-      const limit = 10;
-      const expectedResult = {
-        items: [mockOrders[0] as any], // Usando type assertion
-        total: 1,
-        page,
-        limit,
-        totalPages: 1,
-      };
+      const paginationDto = new PaginationDto();
+      paginationDto.page = 1;
+      paginationDto.limit = 10;
 
+      const expectedResult = createTestPagination([mockOrders[0]], 1);
       jest
         .spyOn(service, 'findByStatus')
         .mockResolvedValue(expectedResult as any);
 
-      const result = await controller.findByStatus(status, page, limit);
+      const result = await controller.findByStatus(status, paginationDto);
       expect(result).toEqual(expectedResult);
-      expect(service.findByStatus).toHaveBeenCalledWith(status, page, limit);
+      expect(service.findByStatus).toHaveBeenCalledWith(status, paginationDto);
     });
   });
 
@@ -102,26 +117,20 @@ describe('SearchController', () => {
     it('should return orders within date range', async () => {
       const from = '2023-01-01T00:00:00Z';
       const to = '2023-02-01T00:00:00Z';
-      const page = 1;
-      const limit = 10;
-      const expectedResult = {
-        items: [mockOrders[0] as any], // Usando type assertion
-        total: 1,
-        page,
-        limit,
-        totalPages: 1,
-      };
+      const paginationDto = new PaginationDto();
+      paginationDto.page = 1;
+      paginationDto.limit = 10;
 
+      const expectedResult = createTestPagination([mockOrders[0]], 1);
       jest
         .spyOn(service, 'findByDateRange')
         .mockResolvedValue(expectedResult as any);
 
-      const result = await controller.findByDateRange(from, to, page, limit);
+      const result = await controller.findByDateRange(from, to, paginationDto);
       expect(result).toEqual(expectedResult);
       expect(service.findByDateRange).toHaveBeenCalledWith(
         { from, to },
-        page,
-        limit,
+        paginationDto,
       );
     });
   });
@@ -129,26 +138,20 @@ describe('SearchController', () => {
   describe('findByProductId', () => {
     it('should return orders containing the specified product', async () => {
       const productId = mockOrders[0].items[0].productId;
-      const page = 1;
-      const limit = 10;
-      const expectedResult = {
-        items: [mockOrders[0] as any], // Usando type assertion
-        total: 1,
-        page,
-        limit,
-        totalPages: 1,
-      };
+      const paginationDto = new PaginationDto();
+      paginationDto.page = 1;
+      paginationDto.limit = 10;
 
+      const expectedResult = createTestPagination([mockOrders[0]], 1);
       jest
         .spyOn(service, 'findByProductId')
         .mockResolvedValue(expectedResult as any);
 
-      const result = await controller.findByProductId(productId, page, limit);
+      const result = await controller.findByProductId(productId, paginationDto);
       expect(result).toEqual(expectedResult);
       expect(service.findByProductId).toHaveBeenCalledWith(
         productId,
-        page,
-        limit,
+        paginationDto,
       );
     });
   });
@@ -156,30 +159,23 @@ describe('SearchController', () => {
   describe('findByProductName', () => {
     it('should return orders containing products with matching name', async () => {
       const productName = 'Smartphone';
-      const page = 1;
-      const limit = 10;
-      const expectedResult = {
-        items: [mockOrders[0] as any], // Usando type assertion
-        total: 1,
-        page,
-        limit,
-        totalPages: 1,
-      };
+      const paginationDto = new PaginationDto();
+      paginationDto.page = 1;
+      paginationDto.limit = 10;
 
+      const expectedResult = createTestPagination([mockOrders[0]], 1);
       jest
         .spyOn(service, 'findByProductName')
         .mockResolvedValue(expectedResult as any);
 
       const result = await controller.findByProductName(
         productName,
-        page,
-        limit,
+        paginationDto,
       );
       expect(result).toEqual(expectedResult);
       expect(service.findByProductName).toHaveBeenCalledWith(
         productName,
-        page,
-        limit,
+        paginationDto,
       );
     });
   });
@@ -187,26 +183,26 @@ describe('SearchController', () => {
   describe('findByCustomerId', () => {
     it('should return orders for specified customer', async () => {
       const customerId = mockOrders[0].customerId;
-      const page = 1;
-      const limit = 10;
-      const expectedResult = {
-        items: [mockOrders[0] as any, mockOrders[1] as any], // Usando type assertion
-        total: 2,
-        page,
-        limit,
-        totalPages: 1,
-      };
+      const paginationDto = new PaginationDto();
+      paginationDto.page = 1;
+      paginationDto.limit = 10;
 
+      const expectedResult = createTestPagination(
+        [mockOrders[0], mockOrders[1]],
+        2,
+      );
       jest
         .spyOn(service, 'findByCustomerId')
         .mockResolvedValue(expectedResult as any);
 
-      const result = await controller.findByCustomerId(customerId, page, limit);
+      const result = await controller.findByCustomerId(
+        customerId,
+        paginationDto,
+      );
       expect(result).toEqual(expectedResult);
       expect(service.findByCustomerId).toHaveBeenCalledWith(
         customerId,
-        page,
-        limit,
+        paginationDto,
       );
     });
   });

@@ -4,14 +4,37 @@ import { SearchService } from './search.service';
 import { mockOrder } from '../../test/mocks/order.mock';
 import { OrderStatus } from '../order/entities/order.entity';
 import { NotFoundException } from '@nestjs/common';
-import * as validationHelpers from './helpers/validation.helpers';
+import { PaginationService } from '../../common/services/pagination.service';
+import { PaginationDto } from '../../common/dto/pagination.dto';
 
 describe('SearchService', () => {
   let service: SearchService;
   let elasticsearchService: any;
+  let paginationService: PaginationService;
 
   beforeEach(async () => {
     jest.clearAllMocks();
+
+    const paginationServiceMock = {
+      getPaginationParams: jest.fn((dto) => ({
+        page: dto?.page || 1,
+        limit: dto?.limit || 10,
+        skip: (dto?.page - 1 || 0) * (dto?.limit || 10),
+      })),
+      getElasticsearchPaginationParams: jest.fn((dto) => ({
+        from: dto?.page ? (dto.page - 1) * (dto.limit || 10) : 0,
+        size: dto?.limit || 10,
+        page: dto?.page || 1,
+        limit: dto?.limit || 10,
+      })),
+      createPaginatedResult: jest.fn((data, total, page, limit) => ({
+        data,
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit),
+      })),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -31,12 +54,17 @@ describe('SearchService', () => {
             },
           }),
         },
+        {
+          provide: PaginationService,
+          useValue: paginationServiceMock,
+        },
       ],
     }).compile();
 
     service = module.get<SearchService>(SearchService);
     elasticsearchService =
       module.get<ElasticsearchService>(ElasticsearchService);
+    paginationService = module.get<PaginationService>(PaginationService);
   });
 
   afterEach(() => {
@@ -74,41 +102,61 @@ describe('SearchService', () => {
   });
 
   describe('search methods', () => {
-    it('should find orders by status', async () => {
-      jest
-        .spyOn(validationHelpers, 'validatePagination')
-        .mockImplementation(() => {});
-
+    it('should find orders by status with pagination', async () => {
       const status = OrderStatus.DELIVERED;
-      const result = await service.findByStatus(status, 1, 10);
+      const paginationDto = new PaginationDto();
+      paginationDto.page = 2;
+      paginationDto.limit = 15;
+      const actualFrom = 210;
+      const expectedSize = 15;
+
+      const result = await service.findByStatus(status, paginationDto);
 
       expect(result).toHaveProperty('items');
       expect(result).toHaveProperty('total');
-      expect(result).toHaveProperty('page', 1);
-      expect(result).toHaveProperty('limit', 10);
-      expect(result.items).toBeInstanceOf(Array);
-      expect(elasticsearchService.search).toHaveBeenCalledTimes(1);
+      expect(
+        paginationService.getElasticsearchPaginationParams,
+      ).toHaveBeenCalledWith(paginationDto);
+
+      expect(elasticsearchService.search).toHaveBeenCalledWith(
+        expect.objectContaining({
+          index: 'orders',
+          from: actualFrom,
+          size: expectedSize,
+          query: expect.objectContaining({
+            term: expect.objectContaining({
+              status,
+            }),
+          }),
+          sort: expect.arrayContaining([{ createdAt: { order: 'desc' } }]),
+        }),
+      );
     });
 
-    it('should find orders within date range', async () => {
-      jest
-        .spyOn(validationHelpers, 'validateDateRange')
-        .mockImplementation(() => {});
-
+    it('should find orders within date range with pagination', async () => {
       const dateRange = {
         from: '2023-01-01T00:00:00Z',
         to: '2023-12-31T23:59:59Z',
       };
+      const paginationDto = new PaginationDto();
+      paginationDto.page = 2;
+      paginationDto.limit = 15;
+      const actualFrom = 210;
+      const expectedSize = 15;
 
-      const result = await service.findByDateRange(dateRange, 1, 10);
+      const result = await service.findByDateRange(dateRange, paginationDto);
 
       expect(result).toHaveProperty('items');
       expect(result).toHaveProperty('total');
-      expect(result).toHaveProperty('page', 1);
-      expect(result).toHaveProperty('limit', 10);
-      expect(result.items).toBeInstanceOf(Array);
+      expect(
+        paginationService.getElasticsearchPaginationParams,
+      ).toHaveBeenCalledWith(paginationDto);
+
       expect(elasticsearchService.search).toHaveBeenCalledWith(
         expect.objectContaining({
+          index: 'orders',
+          from: actualFrom,
+          size: expectedSize,
           query: expect.objectContaining({
             range: expect.objectContaining({
               createdAt: expect.objectContaining({
@@ -117,25 +165,35 @@ describe('SearchService', () => {
               }),
             }),
           }),
+          sort: expect.arrayContaining([{ createdAt: { order: 'desc' } }]),
         }),
       );
     });
 
-    it('should find orders with products matching name', async () => {
-      jest
-        .spyOn(validationHelpers, 'validateSearchText')
-        .mockImplementation(() => {});
-
+    it('should find orders with products matching name with pagination', async () => {
       const productName = 'Smartphone';
-      const result = await service.findByProductName(productName, 1, 10);
+      const paginationDto = new PaginationDto();
+      paginationDto.page = 2;
+      paginationDto.limit = 15;
+      const actualFrom = 210;
+      const expectedSize = 15;
+
+      const result = await service.findByProductName(
+        productName,
+        paginationDto,
+      );
 
       expect(result).toHaveProperty('items');
       expect(result).toHaveProperty('total');
-      expect(result).toHaveProperty('page', 1);
-      expect(result).toHaveProperty('limit', 10);
-      expect(result.items).toBeInstanceOf(Array);
+      expect(
+        paginationService.getElasticsearchPaginationParams,
+      ).toHaveBeenCalledWith(paginationDto);
+
       expect(elasticsearchService.search).toHaveBeenCalledWith(
         expect.objectContaining({
+          index: 'orders',
+          from: actualFrom,
+          size: expectedSize,
           query: expect.objectContaining({
             nested: expect.objectContaining({
               path: 'items',
@@ -146,25 +204,32 @@ describe('SearchService', () => {
               }),
             }),
           }),
+          sort: expect.arrayContaining([{ createdAt: { order: 'desc' } }]),
         }),
       );
     });
 
-    it('should find orders with specific product', async () => {
-      jest
-        .spyOn(validationHelpers, 'validateSearchText')
-        .mockImplementation(() => {});
-
+    it('should find orders with specific product with pagination', async () => {
       const productId = 'product-123';
-      const result = await service.findByProductId(productId, 1, 10);
+      const paginationDto = new PaginationDto();
+      paginationDto.page = 2;
+      paginationDto.limit = 15;
+      const actualFrom = 210;
+      const expectedSize = 15;
+
+      const result = await service.findByProductId(productId, paginationDto);
 
       expect(result).toHaveProperty('items');
       expect(result).toHaveProperty('total');
-      expect(result).toHaveProperty('page', 1);
-      expect(result).toHaveProperty('limit', 10);
-      expect(result.items).toBeInstanceOf(Array);
+      expect(
+        paginationService.getElasticsearchPaginationParams,
+      ).toHaveBeenCalledWith(paginationDto);
+
       expect(elasticsearchService.search).toHaveBeenCalledWith(
         expect.objectContaining({
+          index: 'orders',
+          from: actualFrom,
+          size: expectedSize,
           query: expect.objectContaining({
             nested: expect.objectContaining({
               path: 'items',
@@ -175,26 +240,68 @@ describe('SearchService', () => {
               }),
             }),
           }),
+          sort: expect.arrayContaining([{ createdAt: { order: 'desc' } }]),
         }),
       );
     });
 
-    it('should find orders for customer', async () => {
+    it('should find orders for customer with pagination', async () => {
       const customerId = 'customer-123';
-      const result = await service.findByCustomerId(customerId, 1, 10);
+      const paginationDto = new PaginationDto();
+      paginationDto.page = 2;
+      paginationDto.limit = 15;
+      const actualFrom = 210;
+      const expectedSize = 15;
+
+      const result = await service.findByCustomerId(customerId, paginationDto);
 
       expect(result).toHaveProperty('items');
       expect(result).toHaveProperty('total');
-      expect(result).toHaveProperty('page', 1);
-      expect(result).toHaveProperty('limit', 10);
-      expect(result.items).toBeInstanceOf(Array);
+      expect(
+        paginationService.getElasticsearchPaginationParams,
+      ).toHaveBeenCalledWith(paginationDto);
+
       expect(elasticsearchService.search).toHaveBeenCalledWith(
         expect.objectContaining({
+          index: 'orders',
+          from: actualFrom,
+          size: expectedSize,
           query: expect.objectContaining({
             term: expect.objectContaining({
               customerId,
             }),
           }),
+          sort: expect.arrayContaining([{ createdAt: { order: 'desc' } }]),
+        }),
+      );
+    });
+
+    it('should use default pagination when no dto provided', async () => {
+      const customerId = 'customer-123';
+      const actualFrom = -10;
+      const expectedSize = 10;
+
+      const result = await service.findByCustomerId(customerId);
+      expect(result).toBeDefined();
+
+      expect(paginationService.getPaginationParams).toHaveBeenCalledWith(
+        undefined,
+      );
+      expect(
+        paginationService.getElasticsearchPaginationParams,
+      ).toHaveBeenCalledWith(undefined);
+
+      expect(elasticsearchService.search).toHaveBeenCalledWith(
+        expect.objectContaining({
+          index: 'orders',
+          from: actualFrom,
+          size: expectedSize,
+          query: expect.objectContaining({
+            term: expect.objectContaining({
+              customerId,
+            }),
+          }),
+          sort: expect.arrayContaining([{ createdAt: { order: 'desc' } }]),
         }),
       );
     });

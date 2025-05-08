@@ -1,4 +1,8 @@
-import { ApiResponseOptions } from '@nestjs/swagger';
+import {
+  ApiResponseOptions,
+  ApiParamOptions,
+  ApiQueryOptions,
+} from '@nestjs/swagger';
 import { OrderStatus } from '../../order/entities/order.entity';
 
 /**
@@ -192,7 +196,7 @@ export const SearchSwaggerResponses: Record<string, ApiResponseOptions> = {
 /**
  * Common API documentation for pagination parameters
  */
-export const PaginationApiQueries = [
+export const PaginationApiQueries: ApiQueryOptions[] = [
   {
     name: 'page',
     required: false,
@@ -207,4 +211,100 @@ export const PaginationApiQueries = [
     description: 'Items per page (default: 10, max: 100)',
     example: 10,
   },
+];
+
+/**
+ * API operation descriptions for search endpoints
+ */
+export const SearchApiOperations = {
+  findByUuid: {
+    summary: 'Find order by UUID',
+    description: 'Retrieve an order by its unique identifier (UUID)',
+  },
+  findByStatus: {
+    summary: 'Find orders by status',
+    description: 'Retrieve all orders with a specific status',
+  },
+  findByDateRange: {
+    summary: 'Find orders by date range',
+    description: 'Retrieve orders created within a specific date range',
+  },
+  findByProductId: {
+    summary: 'Find orders containing a specific product',
+    description: 'Retrieve orders that contain a specific product by its ID',
+  },
+  findByProductName: {
+    summary: 'Find orders by product name',
+    description:
+      'Retrieve orders that contain products with names matching the search text',
+  },
+  findByCustomerId: {
+    summary: 'Find orders by customer ID',
+    description: 'Retrieve all orders for a specific customer',
+  },
+};
+
+/**
+ * API parameters for search endpoints
+ */
+export const SearchApiParams: Record<string, ApiParamOptions> = {
+  uuid: {
+    name: 'uuid',
+    description: 'Order UUID',
+    type: String,
+    example: '123e4567-e89b-12d3-a456-426614174000',
+  },
+  status: {
+    name: 'status',
+    description: 'Order status',
+    enum: OrderStatus,
+    example: OrderStatus.DELIVERED,
+  },
+  productId: {
+    name: 'productId',
+    description: 'Product UUID',
+    type: String,
+    example: '550e8400-e29b-41d4-a716-446655440001',
+  },
+  customerId: {
+    name: 'customerId',
+    description: 'Customer UUID',
+    type: String,
+    example: '550e8400-e29b-41d4-a716-446655440000',
+  },
+};
+
+/**
+ * API queries for search endpoints
+ */
+export const SearchApiQueries: Record<string, ApiQueryOptions> = {
+  productName: {
+    name: 'q',
+    required: true,
+    type: String,
+    description: 'Product name search text',
+    example: 'smartphone',
+  },
+  dateFrom: {
+    name: 'from',
+    required: false,
+    type: String,
+    description: 'Start date (ISO format)',
+    example: '2023-01-01T00:00:00.000Z',
+  },
+  dateTo: {
+    name: 'to',
+    required: false,
+    type: String,
+    description: 'End date (ISO format)',
+    example: '2023-12-31T23:59:59.999Z',
+  },
+};
+
+/**
+ * Standard API responses for all search endpoints
+ */
+export const CommonSearchResponses = [
+  { status: 400, description: 'Invalid search parameters' },
+  { status: 500, description: 'Internal server error' },
 ];

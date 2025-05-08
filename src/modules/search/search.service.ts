@@ -3,15 +3,11 @@ import { ElasticsearchService } from '@nestjs/elasticsearch';
 import { DateRangeDto } from './dto/search-query.dto';
 import { SearchResult } from './interfaces/search-result.interface';
 import { OrderStatus } from '../order/entities/order.entity';
-import { SearchRequest } from '@elastic/elasticsearch/lib/api/types';
 import {
   InvalidSearchParametersException,
   SearchExecutionException,
-  SearchServiceUnavailableException,
 } from './exceptions/search-exceptions';
 import {
-  extractOrdersFromResponse,
-  extractTotalFromResponse,
   createUuidSearchRequest,
   createStatusSearchRequest,
   createDateRangeSearchRequest,
@@ -20,18 +16,23 @@ import {
   createCustomerIdSearchRequest,
 } from './helpers/elasticsearch.helpers';
 import {
-  validatePagination,
   validateSearchText,
   validateDateRange,
 } from './helpers/validation.helpers';
 import { logSearchError, logSearchSuccess } from './helpers/logger.helpers';
+import { executeSearch } from './helpers/search.helpers';
+import { PaginationService } from '../../common/services/pagination.service';
+import { PaginationDto } from '../../common/dto/pagination.dto';
 
 @Injectable()
 export class SearchService {
   private readonly logger = new Logger(SearchService.name);
   private readonly indexName = 'orders';
 
-  constructor(private readonly elasticsearchService: ElasticsearchService) {}
+  constructor(
+    private readonly elasticsearchService: ElasticsearchService,
+    private readonly paginationService: PaginationService,
+  ) {}
 
   /**
    * Finds an order by its UUID
@@ -39,7 +40,10 @@ export class SearchService {
   async findByUuid(uuid: string) {
     try {
       const searchRequest = createUuidSearchRequest(uuid, this.indexName);
-      const response = await this.executeSearch(searchRequest);
+      const response = await executeSearch(
+        this.elasticsearchService,
+        searchRequest,
+      );
 
       if (response.total === 0) {
         throw new NotFoundException(`Order with UUID ${uuid} not found`);
@@ -61,19 +65,28 @@ export class SearchService {
    */
   async findByStatus(
     status: OrderStatus,
-    page = 1,
-    limit = 10,
+    paginationDto?: PaginationDto,
   ): Promise<SearchResult> {
     try {
-      validatePagination(page, limit);
+      const { page, limit } =
+        this.paginationService.getPaginationParams(paginationDto);
+
+      const esParams =
+        this.paginationService.getElasticsearchPaginationParams(paginationDto);
 
       const searchRequest = createStatusSearchRequest(
         status,
         this.indexName,
+        esParams.from,
+        esParams.size,
+      );
+
+      const result = await executeSearch(
+        this.elasticsearchService,
+        searchRequest,
         page,
         limit,
       );
-      const result = await this.executeSearch(searchRequest, page, limit);
 
       logSearchSuccess(
         this.logger,
@@ -98,20 +111,29 @@ export class SearchService {
    */
   async findByDateRange(
     dateRange: DateRangeDto,
-    page = 1,
-    limit = 10,
+    paginationDto?: PaginationDto,
   ): Promise<SearchResult> {
     try {
-      validatePagination(page, limit);
       validateDateRange(dateRange.from, dateRange.to);
+
+      const { page, limit } =
+        this.paginationService.getPaginationParams(paginationDto);
+      const esParams =
+        this.paginationService.getElasticsearchPaginationParams(paginationDto);
 
       const searchRequest = createDateRangeSearchRequest(
         dateRange,
         this.indexName,
+        esParams.from,
+        esParams.size,
+      );
+
+      const result = await executeSearch(
+        this.elasticsearchService,
+        searchRequest,
         page,
         limit,
       );
-      const result = await this.executeSearch(searchRequest, page, limit);
 
       logSearchSuccess(
         this.logger,
@@ -141,19 +163,27 @@ export class SearchService {
    */
   async findByProductId(
     productId: string,
-    page = 1,
-    limit = 10,
+    paginationDto?: PaginationDto,
   ): Promise<SearchResult> {
     try {
-      validatePagination(page, limit);
+      const { page, limit } =
+        this.paginationService.getPaginationParams(paginationDto);
+      const esParams =
+        this.paginationService.getElasticsearchPaginationParams(paginationDto);
 
       const searchRequest = createProductIdSearchRequest(
         productId,
         this.indexName,
+        esParams.from,
+        esParams.size,
+      );
+
+      const result = await executeSearch(
+        this.elasticsearchService,
+        searchRequest,
         page,
         limit,
       );
-      const result = await this.executeSearch(searchRequest, page, limit);
 
       logSearchSuccess(
         this.logger,
@@ -183,20 +213,29 @@ export class SearchService {
    */
   async findByProductName(
     productName: string,
-    page = 1,
-    limit = 10,
+    paginationDto?: PaginationDto,
   ): Promise<SearchResult> {
     try {
-      validatePagination(page, limit);
       validateSearchText(productName, 'Product name');
+
+      const { page, limit } =
+        this.paginationService.getPaginationParams(paginationDto);
+      const esParams =
+        this.paginationService.getElasticsearchPaginationParams(paginationDto);
 
       const searchRequest = createProductNameSearchRequest(
         productName,
         this.indexName,
+        esParams.from,
+        esParams.size,
+      );
+
+      const result = await executeSearch(
+        this.elasticsearchService,
+        searchRequest,
         page,
         limit,
       );
-      const result = await this.executeSearch(searchRequest, page, limit);
 
       logSearchSuccess(
         this.logger,
@@ -226,19 +265,27 @@ export class SearchService {
    */
   async findByCustomerId(
     customerId: string,
-    page = 1,
-    limit = 10,
+    paginationDto?: PaginationDto,
   ): Promise<SearchResult> {
     try {
-      validatePagination(page, limit);
+      const { page, limit } =
+        this.paginationService.getPaginationParams(paginationDto);
+      const esParams =
+        this.paginationService.getElasticsearchPaginationParams(paginationDto);
 
       const searchRequest = createCustomerIdSearchRequest(
         customerId,
         this.indexName,
+        esParams.from,
+        esParams.size,
+      );
+
+      const result = await executeSearch(
+        this.elasticsearchService,
+        searchRequest,
         page,
         limit,
       );
-      const result = await this.executeSearch(searchRequest, page, limit);
 
       logSearchSuccess(
         this.logger,
@@ -260,38 +307,6 @@ export class SearchService {
         throw error;
       }
       throw new SearchExecutionException(error.message);
-    }
-  }
-
-  /**
-   * Execute search with error handling and response processing
-   */
-  private async executeSearch(
-    searchRequest: SearchRequest,
-    page = 1,
-    limit = 10,
-  ): Promise<SearchResult> {
-    try {
-      const searchResponse =
-        await this.elasticsearchService.search(searchRequest);
-
-      const items = extractOrdersFromResponse(searchResponse);
-      const total = extractTotalFromResponse(searchResponse);
-      const totalPages = Math.ceil(total / limit);
-
-      return {
-        items,
-        total,
-        page,
-        limit,
-        totalPages,
-      };
-    } catch (error) {
-      if (error.meta?.statusCode === 503 || error.name === 'ConnectionError') {
-        throw new SearchServiceUnavailableException(error.message);
-      } else {
-        throw new SearchExecutionException(error.message);
-      }
     }
   }
 }

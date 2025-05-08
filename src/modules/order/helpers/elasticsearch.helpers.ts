@@ -20,7 +20,6 @@ export function mapElasticsearchResponseToOrders(searchResponse: any): Order[] {
     order.createdAt = new Date(source.createdAt);
     order.updatedAt = new Date(source.updatedAt);
 
-    // Map items if they exist
     if (source.items && Array.isArray(source.items)) {
       order.items = source.items.map((item: any) => {
         const orderItem = new OrderItem();
@@ -52,8 +51,8 @@ export function prepareOrderDocument(order: Order): OrderDocument {
     customerId: order.customerId,
     status: order.status,
     total: order.total,
-    createdAt: order.createdAt.toISOString(), // Convertendo Date para string
-    updatedAt: order.updatedAt.toISOString(), // Convertendo Date para string
+    createdAt: order.createdAt,
+    updatedAt: order.updatedAt,
     items: order.items.map((item) => ({
       uuid: item.uuid,
       productId: item.productId,
@@ -77,4 +76,47 @@ export function formatElasticsearchErrorMessage(
   error: any,
 ): string {
   return `Failed to ${operation} in Elasticsearch: ${error.message}`;
+}
+
+/**
+ * Maps a document from Elasticsearch to an Order entity
+ *
+ * @param source Document source from Elasticsearch
+ * @returns Order entity
+ */
+export function mapResponseToOrderEntity(
+  source: OrderDocument | null,
+): Order | null {
+  if (!source) {
+    return null;
+  }
+
+  const order = new Order();
+
+  order.uuid = source.uuid;
+  order.id = source.id;
+  order.customerId = source.customerId;
+  order.status = source.status;
+  order.total = source.total;
+
+  order.createdAt = source.createdAt ? new Date(source.createdAt) : undefined;
+  order.updatedAt = source.updatedAt ? new Date(source.updatedAt) : undefined;
+
+  if (source.items && Array.isArray(source.items)) {
+    order.items = source.items.map((item) => {
+      const orderItem = new OrderItem();
+      orderItem.uuid = item.uuid;
+      orderItem.id = item.id;
+      orderItem.productId = item.productId;
+      orderItem.productName = item.productName;
+      orderItem.price = item.price;
+      orderItem.quantity = item.quantity;
+      orderItem.subtotal = item.subtotal;
+      return orderItem;
+    });
+  } else {
+    order.items = [];
+  }
+
+  return order;
 }

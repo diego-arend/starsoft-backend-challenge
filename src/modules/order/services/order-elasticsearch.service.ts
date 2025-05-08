@@ -7,8 +7,12 @@ import {
   mapElasticsearchResponseToOrders,
   prepareOrderDocument,
 } from '../helpers/elasticsearch.helpers';
-import { ElasticsearchSearchException } from '../exceptions/elasticsearch-exceptions';
 import { OrderReconciliationService } from './order-reconciliation.service';
+import { PaginationDto } from '../../../common/dto/pagination.dto';
+import { PaginatedResult } from '../../../common/interfaces/paginated-result.interface';
+import { PaginationService } from '../../../common/services/pagination.service';
+import { ElasticsearchSearchException } from '../exceptions/elasticsearch-exceptions';
+import { mapResponseToOrderEntity } from '../helpers/elasticsearch.helpers';
 import { OrderDocument } from '../interfaces/order-document.interface';
 
 /**
@@ -22,6 +26,7 @@ export class OrderElasticsearchService {
     private readonly elasticsearchService: ElasticsearchService,
     private readonly logger: LoggerService,
     private readonly reconciliationService: OrderReconciliationService,
+    private readonly paginationService: PaginationService,
   ) {}
 
   //---------------------------------------------
@@ -145,25 +150,50 @@ export class OrderElasticsearchService {
   /**
    * Finds all orders in Elasticsearch
    *
-   * @returns Array of orders
+   * @returns Paginated result of orders
    */
-  async findAll(): Promise<Order[]> {
-    try {
-      const searchResponse =
-        await this.elasticsearchService.search<OrderDocument>({
-          index: this.indexName,
-          sort: [{ createdAt: { order: 'desc' } }],
-          size: 1000,
-        });
+  async findAll(
+    paginationDto: PaginationDto = {},
+  ): Promise<PaginatedResult<Order>> {
+    const { from, size, page, limit } =
+      this.paginationService.getElasticsearchPaginationParams(paginationDto);
 
-      return mapElasticsearchResponseToOrders(searchResponse);
+    try {
+      const response = await this.elasticsearchService.search({
+        index: this.indexName,
+        from,
+        size,
+        sort: [{ createdAt: { order: 'desc' } }],
+      });
+
+      const hits = response.hits.hits;
+      const total =
+        typeof response.hits.total === 'number'
+          ? response.hits.total
+          : response.hits.total.value;
+
+      const orders = hits.map((hit) =>
+        mapResponseToOrderEntity(hit._source as OrderDocument),
+      );
+
+      return this.paginationService.createPaginatedResult(
+        orders,
+        total,
+        page,
+        limit,
+      );
     } catch (error) {
       this.logger.error(
-        formatElasticsearchErrorMessage('fetch all orders', error),
+        formatElasticsearchErrorMessage('find all orders', error),
         error.stack,
         'OrderElasticsearchService',
       );
-      throw new ElasticsearchSearchException('all orders', error);
+
+      throw new ElasticsearchSearchException('orders', {
+        paginationParams: { from, size, page, limit },
+        originalError: error.message,
+        query: { sort: [{ createdAt: { order: 'desc' } }] },
+      });
     }
   }
 
@@ -171,36 +201,63 @@ export class OrderElasticsearchService {
    * Finds orders by customer in Elasticsearch
    *
    * @param customerId Customer ID
-   * @returns Array of customer orders
+   * @returns Paginated result of customer orders
    */
-  async findByCustomer(customerId: string): Promise<Order[]> {
-    try {
-      const searchResponse =
-        await this.elasticsearchService.search<OrderDocument>({
-          index: this.indexName,
-          query: {
-            match: {
-              customerId: customerId,
-            },
-          },
-          sort: [{ createdAt: { order: 'desc' } }],
-          size: 1000,
-        });
+  async findByCustomer(
+    customerId: string,
+    paginationDto: PaginationDto = {},
+  ): Promise<PaginatedResult<Order>> {
+    const { from, size, page, limit } =
+      this.paginationService.getElasticsearchPaginationParams(paginationDto);
 
-      return mapElasticsearchResponseToOrders(searchResponse);
+    try {
+      const response = await this.elasticsearchService.search({
+        index: this.indexName,
+        from,
+        size,
+        query: {
+          match: {
+            customerId: customerId,
+          },
+        },
+        sort: [{ createdAt: { order: 'desc' } }],
+      });
+
+      const hits = response.hits.hits;
+      const total =
+        typeof response.hits.total === 'number'
+          ? response.hits.total
+          : response.hits.total.value;
+
+      const orders = hits.map((hit) =>
+        mapResponseToOrderEntity(hit._source as OrderDocument),
+      );
+
+      return this.paginationService.createPaginatedResult(
+        orders,
+        total,
+        page,
+        limit,
+      );
     } catch (error) {
       this.logger.error(
         formatElasticsearchErrorMessage(
-          `fetch customer ${customerId} orders`,
+          `find orders for customer ${customerId}`,
           error,
         ),
         error.stack,
         'OrderElasticsearchService',
       );
-      throw new ElasticsearchSearchException(
-        `customer ${customerId} orders`,
-        error,
-      );
+
+      throw new ElasticsearchSearchException('customer orders', {
+        customerId,
+        paginationParams: { from, size, page, limit },
+        originalError: error.message,
+        query: {
+          match: { customerId },
+          sort: [{ createdAt: { order: 'desc' } }],
+        },
+      });
     }
   }
 
@@ -212,15 +269,14 @@ export class OrderElasticsearchService {
    */
   async findOneByUuid(uuid: string): Promise<Order | null> {
     try {
-      const searchResponse =
-        await this.elasticsearchService.search<OrderDocument>({
-          index: this.indexName,
-          query: {
-            match: {
-              uuid: uuid,
-            },
+      const searchResponse = await this.elasticsearchService.search({
+        index: this.indexName,
+        query: {
+          match: {
+            uuid: uuid,
           },
-        });
+        },
+      });
 
       const orders = mapElasticsearchResponseToOrders(searchResponse);
       return orders.length > 0 ? orders[0] : null;
@@ -230,7 +286,12 @@ export class OrderElasticsearchService {
         error.stack,
         'OrderElasticsearchService',
       );
-      return null;
+
+      throw new ElasticsearchSearchException('order by uuid', {
+        uuid,
+        originalError: error.message,
+        query: { match: { uuid } },
+      });
     }
   }
 
@@ -255,7 +316,10 @@ export class OrderElasticsearchService {
         'OrderElasticsearchService',
       );
 
-      throw error; // Propagate error as this is a primary read operation
+      throw new ElasticsearchSearchException('generic order search', {
+        query,
+        originalError: error.message,
+      });
     }
   }
 }

@@ -7,12 +7,21 @@ import {
   Param,
   Delete,
   ParseUUIDPipe,
+  Query,
 } from '@nestjs/common';
 import { OrderService } from './order.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
+import { PaginationDto } from '../../common/dto/pagination.dto';
 import { Order } from './entities/order.entity';
+import { PaginatedResult } from '../../common/interfaces/paginated-result.interface';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiParam,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { OrderSwaggerResponses } from './swagger/order-swagger.responses';
 
 @ApiTags('orders')
@@ -33,14 +42,16 @@ export class OrderController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Get all orders' })
+  @ApiOperation({ summary: 'Get all orders with pagination' })
   @ApiResponse({
-    ...OrderSwaggerResponses.Get.Success,
-    type: [Order],
+    status: 200,
+    description: 'Returns a paginated list of orders',
   })
-  @ApiResponse(OrderSwaggerResponses.Get.ElasticsearchError)
-  findAll(): Promise<Order[]> {
-    return this.orderService.findAll();
+  @ApiQuery({ type: PaginationDto })
+  async findAll(
+    @Query() paginationDto: PaginationDto,
+  ): Promise<PaginatedResult<Order>> {
+    return this.orderService.findAll(paginationDto);
   }
 
   @Get(':uuid')
@@ -85,14 +96,18 @@ export class OrderController {
   }
 
   @Get('customer/:customerId')
-  @ApiOperation({ summary: 'Get orders by customer ID' })
-  @ApiParam({ name: 'customerId', description: 'Customer ID' })
-  @ApiResponse({
-    ...OrderSwaggerResponses.CustomerSearch.Success,
-    type: [Order],
+  @ApiOperation({
+    summary: 'Get all orders for a specific customer with pagination',
   })
-  @ApiResponse(OrderSwaggerResponses.CustomerSearch.ElasticsearchError)
-  findByCustomer(@Param('customerId', ParseUUIDPipe) customerId: string) {
-    return this.orderService.findByCustomer(customerId);
+  @ApiResponse({
+    status: 200,
+    description: 'Returns a paginated list of customer orders',
+  })
+  @ApiQuery({ type: PaginationDto })
+  async findByCustomer(
+    @Param('customerId') customerId: string,
+    @Query() paginationDto: PaginationDto,
+  ): Promise<PaginatedResult<Order>> {
+    return this.orderService.findByCustomer(customerId, paginationDto);
   }
 }

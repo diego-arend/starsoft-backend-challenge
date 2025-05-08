@@ -5,6 +5,8 @@ import { OrderPostgresService } from './order-postgres.service';
 import { Order, OrderStatus } from '../entities/order.entity';
 import { OrderItem } from '../entities/order-item.entity';
 import { LoggerService } from '../../../logger/logger.service';
+import { PaginationService } from '../../../common/services/pagination.service';
+import { PaginationDto } from '../../../common/dto/pagination.dto';
 import { createMockLoggerService } from '../test/test.providers';
 import {
   createMockOrderRepository,
@@ -25,13 +27,37 @@ describe('OrderPostgresService', () => {
   let orderRepository: Repository<Order>;
   let dataSource: DataSource;
   let loggerService: LoggerService;
+  let paginationService: PaginationService;
   let queryRunner: any;
 
   beforeEach(async () => {
-    const orderRepositoryMock = createMockOrderRepository();
+    const baseOrderRepositoryMock = createMockOrderRepository();
+
+    const orderRepositoryMock = {
+      ...baseOrderRepositoryMock,
+      findAndCount: jest.fn().mockImplementation(async () => {
+        return [[], 0];
+      }),
+    };
+
     const orderItemRepositoryMock = createMockOrderItemRepository();
     const dataSourceMock = createMockDataSource();
     const loggerServiceMock = createMockLoggerService();
+
+    const paginationServiceMock = {
+      getPaginationParams: jest.fn((dto) => ({
+        page: dto?.page || 1,
+        limit: dto?.limit || 10,
+        skip: (dto?.page - 1 || 0) * (dto?.limit || 10),
+      })),
+      createPaginatedResult: jest.fn((data, total, page, limit) => ({
+        data,
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit),
+      })),
+    };
 
     queryRunner = dataSourceMock.createQueryRunner();
 
@@ -54,6 +80,10 @@ describe('OrderPostgresService', () => {
           provide: LoggerService,
           useValue: loggerServiceMock,
         },
+        {
+          provide: PaginationService,
+          useValue: paginationServiceMock,
+        },
       ],
     }).compile();
 
@@ -61,6 +91,7 @@ describe('OrderPostgresService', () => {
     orderRepository = module.get<Repository<Order>>(getRepositoryToken(Order));
     dataSource = module.get<DataSource>(DataSource);
     loggerService = module.get<LoggerService>(LoggerService);
+    paginationService = module.get<PaginationService>(PaginationService);
   });
 
   afterEach(() => {
@@ -101,9 +132,7 @@ describe('OrderPostgresService', () => {
 
       try {
         await service.create(dto);
-      } catch (error) {
-        // Ignore error
-      }
+      } catch (error) {}
 
       expect(queryRunner.release).toHaveBeenCalled();
     });
@@ -111,13 +140,64 @@ describe('OrderPostgresService', () => {
 
   describe('findAll', () => {
     it('should return all orders', async () => {
+      const mockOrders = [{ id: 1 }, { id: 2 }];
+      const total = 2;
+
+      jest
+        .spyOn(orderRepository, 'findAndCount')
+        .mockResolvedValue([mockOrders as any, total]);
+
       const result = await service.findAll();
 
-      expect(orderRepository.find).toHaveBeenCalledWith({
-        relations: ['items'],
+      expect(orderRepository.findAndCount).toHaveBeenCalledWith({
+        take: 10,
+        skip: 0,
         order: { createdAt: 'DESC' },
+        relations: ['items'],
       });
-      expect(result).toBeInstanceOf(Array);
+
+      expect(paginationService.createPaginatedResult).toHaveBeenCalledWith(
+        mockOrders,
+        total,
+        1,
+        10,
+      );
+
+      expect(result.data).toBeDefined();
+      expect(result.total).toBe(total);
+    });
+
+    it('should return paginated orders', async () => {
+      const mockOrders = [{ id: 3 }, { id: 4 }];
+      const total = 10;
+      const paginationDto = new PaginationDto();
+      paginationDto.page = 2;
+      paginationDto.limit = 2;
+
+      jest
+        .spyOn(orderRepository, 'findAndCount')
+        .mockResolvedValue([mockOrders as any, total]);
+
+      const result = await service.findAll(paginationDto);
+
+      expect(orderRepository.findAndCount).toHaveBeenCalledWith({
+        take: 2,
+        skip: 2,
+        order: { createdAt: 'DESC' },
+        relations: ['items'],
+      });
+
+      expect(paginationService.createPaginatedResult).toHaveBeenCalledWith(
+        mockOrders,
+        total,
+        2,
+        2,
+      );
+
+      expect(result.page).toBe(2);
+      expect(result.limit).toBe(2);
+      expect(result.total).toBe(total);
+      expect(result.pages).toBe(5);
     });
   });
 
@@ -257,14 +337,59 @@ describe('OrderPostgresService', () => {
   describe('findByCustomer', () => {
     it('should return orders by customer ID', async () => {
       const customerId = '550e8400-e29b-41d4-a716-446655440000';
+      const mockOrders = [
+        { id: 1, customerId },
+        { id: 2, customerId },
+      ];
+      const total = 2;
+
+      jest
+        .spyOn(orderRepository, 'findAndCount')
+        .mockResolvedValue([mockOrders as any, total]);
+
       const result = await service.findByCustomer(customerId);
 
-      expect(orderRepository.find).toHaveBeenCalledWith({
+      expect(orderRepository.findAndCount).toHaveBeenCalledWith({
         where: { customerId },
-        relations: ['items'],
+        take: 10,
+        skip: 0,
         order: { createdAt: 'DESC' },
+        relations: ['items'],
       });
-      expect(result).toBeInstanceOf(Array);
+
+      expect(result.data).toBeDefined();
+      expect(result.total).toBe(total);
+    });
+
+    it('should return paginated customer orders', async () => {
+      const customerId = '550e8400-e29b-41d4-a716-446655440000';
+      const mockOrders = [
+        { id: 3, customerId },
+        { id: 4, customerId },
+      ];
+      const total = 8;
+      const paginationDto = new PaginationDto();
+      paginationDto.page = 2;
+      paginationDto.limit = 2;
+
+      jest
+        .spyOn(orderRepository, 'findAndCount')
+        .mockResolvedValue([mockOrders as any, total]);
+
+      const result = await service.findByCustomer(customerId, paginationDto);
+
+      expect(orderRepository.findAndCount).toHaveBeenCalledWith({
+        where: { customerId },
+        take: 2,
+        skip: 2,
+        order: { createdAt: 'DESC' },
+        relations: ['items'],
+      });
+
+      expect(result.page).toBe(2);
+      expect(result.limit).toBe(2);
+      expect(result.total).toBe(total);
+      expect(result.pages).toBe(4);
     });
   });
 });

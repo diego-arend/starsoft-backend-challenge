@@ -3,10 +3,15 @@ import { OrderController } from './order.controller';
 import { OrderService } from './order.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
-import { createSampleOrder } from './test/controller-test.providers';
+import {
+  createSampleOrder,
+  cloneSampleOrderWithNewUuid,
+} from './test/controller-test.providers';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { Order } from './entities/order.entity';
 import { OrderStatus } from './entities/order.entity';
+import { PaginationDto } from '../../common/dto/pagination.dto';
+import { PaginatedResult } from '../../common/interfaces/paginated-result.interface';
 
 describe('OrderController', () => {
   let controller: OrderController;
@@ -40,7 +45,6 @@ describe('OrderController', () => {
 
   describe('create', () => {
     it('should create a new order successfully', async () => {
-      // Arrange
       const createOrderDto: CreateOrderDto = {
         customerId: 'customer-123',
         items: [
@@ -75,14 +79,44 @@ describe('OrderController', () => {
   });
 
   describe('findAll', () => {
-    it('should return all orders', async () => {
-      const orders = [sampleOrder, { ...sampleOrder, uuid: 'order-2' }];
-      orderService.findAll.mockResolvedValue(orders);
+    it('should return paginated orders', async () => {
+      const secondOrder = cloneSampleOrderWithNewUuid(sampleOrder);
+      secondOrder.uuid = 'order-2';
 
-      const result = await controller.findAll();
+      const paginatedOrders: PaginatedResult<Order> = {
+        data: [sampleOrder, secondOrder],
+        total: 2,
+        page: 1,
+        limit: 10,
+        pages: 1,
+      };
 
-      expect(result).toEqual(orders);
-      expect(result.length).toBe(2);
+      orderService.findAll.mockResolvedValue(paginatedOrders);
+      const paginationDto: PaginationDto = { page: 1, limit: 10 };
+
+      const result = await controller.findAll(paginationDto);
+
+      expect(result).toEqual(paginatedOrders);
+      expect(result.data.length).toBe(2);
+      expect(result.page).toBe(1);
+      expect(result.total).toBe(2);
+    });
+
+    it('should use default pagination when not provided', async () => {
+      const paginatedOrders: PaginatedResult<Order> = {
+        data: [sampleOrder],
+        total: 1,
+        page: 1,
+        limit: 10,
+        pages: 1,
+      };
+
+      orderService.findAll.mockResolvedValue(paginatedOrders);
+
+      const result = await controller.findAll({});
+
+      expect(orderService.findAll).toHaveBeenCalled();
+      expect(result.data.length).toBe(1);
     });
   });
 
@@ -112,7 +146,10 @@ describe('OrderController', () => {
       const updateOrderDto: UpdateOrderDto = {
         status: OrderStatus.PROCESSING,
       };
-      const updatedOrder = { ...sampleOrder, status: OrderStatus.PROCESSING };
+
+      const updatedOrder = cloneSampleOrderWithNewUuid(sampleOrder);
+      updatedOrder.status = OrderStatus.PROCESSING;
+
       orderService.update.mockResolvedValue(updatedOrder);
 
       const result = await controller.update(uuid, updateOrderDto);
@@ -139,7 +176,10 @@ describe('OrderController', () => {
   describe('cancel', () => {
     it('should cancel an order successfully', async () => {
       const uuid = 'test-uuid';
-      const canceledOrder = { ...sampleOrder, status: OrderStatus.CANCELED };
+
+      const canceledOrder = cloneSampleOrderWithNewUuid(sampleOrder);
+      canceledOrder.status = OrderStatus.CANCELED;
+
       orderService.cancel.mockResolvedValue(canceledOrder);
 
       const result = await controller.cancel(uuid);
@@ -161,29 +201,49 @@ describe('OrderController', () => {
   });
 
   describe('findByCustomer', () => {
-    it('should return orders by customer ID', async () => {
+    it('should return paginated orders by customer ID', async () => {
       const customerId = 'customer-123';
-      const orders = [
-        { ...sampleOrder, customerId },
-        { ...sampleOrder, customerId, uuid: 'order-2' },
-      ];
-      orderService.findByCustomer.mockResolvedValue(orders);
+      const paginationDto = new PaginationDto();
 
-      const result = await controller.findByCustomer(customerId);
+      const secondOrder = cloneSampleOrderWithNewUuid(sampleOrder);
+      secondOrder.uuid = 'order-2';
 
-      expect(result).toEqual(orders);
-      expect(result.length).toBe(2);
-      expect(result[0].customerId).toBe(customerId);
+      const paginatedResult: PaginatedResult<Order> = {
+        data: [sampleOrder, secondOrder],
+        total: 2,
+        page: 1,
+        limit: 10,
+        pages: 1,
+      };
+
+      orderService.findByCustomer.mockResolvedValue(paginatedResult);
+
+      const result = await controller.findByCustomer(customerId, paginationDto);
+
+      expect(result).toEqual(paginatedResult);
+      expect(result.data.length).toBe(2);
+      expect(result.data[0].customerId).toBe(customerId);
     });
 
-    it('should return empty array when customer has no orders', async () => {
+    it('should return empty data when customer has no orders', async () => {
       const customerId = 'customer-no-orders';
-      orderService.findByCustomer.mockResolvedValue([]);
+      const paginationDto = new PaginationDto();
 
-      const result = await controller.findByCustomer(customerId);
+      const emptyResult: PaginatedResult<Order> = {
+        data: [],
+        total: 0,
+        page: 1,
+        limit: 10,
+        pages: 0,
+      };
 
-      expect(result).toEqual([]);
-      expect(result.length).toBe(0);
+      orderService.findByCustomer.mockResolvedValue(emptyResult);
+
+      const result = await controller.findByCustomer(customerId, paginationDto);
+
+      expect(result).toEqual(emptyResult);
+      expect(result.data.length).toBe(0);
+      expect(result.total).toBe(0);
     });
   });
 });

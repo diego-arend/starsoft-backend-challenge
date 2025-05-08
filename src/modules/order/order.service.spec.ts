@@ -14,9 +14,10 @@ import {
   createSampleUpdateOrderDto,
 } from './test/postgres-test.providers';
 import { createMockEventEmitter } from './test/event-test.providers';
-import { Order } from './entities/order.entity';
+import { Order, OrderStatus } from './entities/order.entity'; // Certifique-se de importar OrderStatus
+import { PaginatedResult } from '../../common/interfaces/paginated-result.interface';
+import { PaginationDto } from '../../common/dto/pagination.dto';
 
-// Test-specific interface to handle additional properties in tests
 interface TestOrder extends Order {
   extraData?: string;
   source?: string;
@@ -26,10 +27,13 @@ describe('OrderService', () => {
   let service: OrderService;
   let postgresService: any;
   let elasticsearchService: any;
-  let sampleOrder: any;
+  let sampleOrder: Order;
+  let secondOrder: Order;
 
   beforeEach(async () => {
     sampleOrder = createSampleOrder();
+    secondOrder = createSampleOrder();
+    secondOrder.uuid = 'order-2';
 
     postgresService = {
       create: jest.fn(),
@@ -80,15 +84,20 @@ describe('OrderService', () => {
   });
 
   describe('update', () => {
-    it('should return updated order on success', async () => {
+    it('should return updated order with proper object structure', async () => {
       const uuid = 'test-uuid';
       const dto = createSampleUpdateOrderDto();
-      const updatedOrder = { ...sampleOrder, status: 'UPDATED' };
+
+      const updatedOrder = createSampleOrder();
+      updatedOrder.uuid = uuid;
+      updatedOrder.status = dto.status;
+
       postgresService.update.mockResolvedValue(updatedOrder);
 
       const result = await service.update(uuid, dto);
 
       expect(result).toEqual(updatedOrder);
+      expect(result.status).toBe(dto.status);
     });
 
     it('should throw BadRequestException when update fails', async () => {
@@ -103,14 +112,21 @@ describe('OrderService', () => {
   });
 
   describe('cancel', () => {
-    it('should return canceled order on success', async () => {
+    it('should return canceled order with proper object structure', async () => {
       const uuid = 'test-uuid';
-      const canceledOrder = { ...sampleOrder, status: 'CANCELED' };
+
+      const canceledOrder = createSampleOrder();
+      canceledOrder.uuid = uuid;
+
+      canceledOrder.status = OrderStatus.CANCELED;
+
       postgresService.cancel.mockResolvedValue(canceledOrder);
 
       const result = await service.cancel(uuid);
 
       expect(result).toEqual(canceledOrder);
+
+      expect(result.status).toBe(OrderStatus.CANCELED);
     });
 
     it('should throw BadRequestException when cancel fails', async () => {
@@ -122,36 +138,83 @@ describe('OrderService', () => {
   });
 
   describe('findAll', () => {
-    it('should return orders from Elasticsearch when available', async () => {
-      const orders = [sampleOrder, { ...sampleOrder, uuid: 'order-2' }];
-      elasticsearchService.findAll.mockResolvedValue(orders);
+    it('should return paginated orders from ElasticsearchService when successful', async () => {
+      const paginationDto = new PaginationDto();
 
-      const result = await service.findAll();
+      const paginatedResult: PaginatedResult<Order> = {
+        data: [sampleOrder, secondOrder],
+        total: 2,
+        page: 1,
+        limit: 10,
+        pages: 1,
+      };
 
-      expect(result).toEqual(orders);
-      expect(result.length).toBe(2);
+      jest
+        .spyOn(elasticsearchService, 'findAll')
+        .mockResolvedValue(paginatedResult);
+
+      const result = await service.findAll(paginationDto);
+
+      expect(result.data.length).toBe(2);
+      expect(result.total).toBe(2);
+      expect(result).toEqual(paginatedResult);
     });
 
-    it('should return orders from PostgreSQL when Elasticsearch fails', async () => {
-      const orders = [sampleOrder, { ...sampleOrder, uuid: 'order-2' }];
-      elasticsearchService.findAll.mockRejectedValue(new Error());
-      postgresService.findAll.mockResolvedValue(orders);
+    it('should fall back to PostgresService when ElasticsearchService fails', async () => {
+      const paginationDto = new PaginationDto();
 
-      const result = await service.findAll();
+      const paginatedResult: PaginatedResult<Order> = {
+        data: [sampleOrder],
+        total: 1,
+        page: 1,
+        limit: 10,
+        pages: 1,
+      };
 
-      expect(result).toEqual(orders);
-      expect(result.length).toBe(2);
+      jest
+        .spyOn(elasticsearchService, 'findAll')
+        .mockRejectedValue(new Error('Connection failed'));
+      jest.spyOn(postgresService, 'findAll').mockResolvedValue(paginatedResult);
+
+      const result = await service.findAll(paginationDto);
+
+      expect(result.data.length).toBe(1);
+      expect(result.total).toBe(1);
+      expect(result).toEqual(paginatedResult);
+    });
+
+    it('should pass pagination parameters to services', async () => {
+      const paginationDto: PaginationDto = { page: 2, limit: 15 };
+
+      const paginatedResult: PaginatedResult<Order> = {
+        data: [sampleOrder],
+        total: 20,
+        page: 2,
+        limit: 15,
+        pages: 2,
+      };
+
+      jest
+        .spyOn(elasticsearchService, 'findAll')
+        .mockResolvedValue(paginatedResult);
+
+      await service.findAll(paginationDto);
+
+      expect(elasticsearchService.findAll).toHaveBeenCalledWith(paginationDto);
     });
   });
 
   describe('findOne', () => {
     it('should return order with combined data', async () => {
       const id = 1;
-      const pgOrder = { ...sampleOrder, id };
-      const esOrder = {
-        ...pgOrder,
-        items: [{ id: 999, productName: 'Test Product' }],
-      };
+
+      const pgOrder = createSampleOrder();
+      pgOrder.id = id;
+
+      const esOrder = createSampleOrder();
+      esOrder.uuid = pgOrder.uuid;
+      esOrder.id = id;
+      esOrder.items = [{ id: 999, productName: 'Test Product' } as any];
 
       postgresService.findOne.mockResolvedValue(pgOrder);
       elasticsearchService.findOneByUuid.mockResolvedValue(esOrder);
@@ -164,7 +227,9 @@ describe('OrderService', () => {
 
     it('should return PostgreSQL data when Elasticsearch fails', async () => {
       const id = 1;
-      const pgOrder = { ...sampleOrder, id };
+
+      const pgOrder = createSampleOrder();
+      pgOrder.id = id;
 
       postgresService.findOne.mockResolvedValue(pgOrder);
       elasticsearchService.findOneByUuid.mockRejectedValue(new Error());
@@ -178,10 +243,11 @@ describe('OrderService', () => {
   describe('findOneByUuid', () => {
     it('should return order from Elasticsearch when available', async () => {
       const uuid = 'test-uuid';
-      const esOrder = {
-        ...sampleOrder,
-        extraData: 'from-elasticsearch',
-      } as TestOrder;
+
+      const esOrder = createSampleOrder() as TestOrder;
+      esOrder.uuid = uuid;
+      esOrder.extraData = 'from-elasticsearch';
+
       elasticsearchService.findOneByUuid.mockResolvedValue(esOrder);
 
       const result = await service.findOneByUuid(uuid);
@@ -192,7 +258,10 @@ describe('OrderService', () => {
 
     it('should return order from PostgreSQL when Elasticsearch fails', async () => {
       const uuid = 'test-uuid';
-      const pgOrder = { ...sampleOrder, source: 'postgresql' } as TestOrder;
+
+      const pgOrder = createSampleOrder() as TestOrder;
+      pgOrder.uuid = uuid;
+      pgOrder.source = 'postgresql';
 
       elasticsearchService.findOneByUuid.mockRejectedValue(new Error());
       postgresService.findOneByUuid.mockResolvedValue(pgOrder);
@@ -205,35 +274,82 @@ describe('OrderService', () => {
   });
 
   describe('findByCustomer', () => {
-    it('should return customer orders from Elasticsearch when available', async () => {
+    it('should return customer orders from ElasticsearchService when successful', async () => {
       const customerId = 'customer-123';
-      const orders = [
-        { ...sampleOrder, customerId },
-        { ...sampleOrder, customerId, uuid: 'order-2' },
-      ];
-      elasticsearchService.findByCustomer.mockResolvedValue(orders);
+      const paginationDto = new PaginationDto();
 
-      const result = await service.findByCustomer(customerId);
+      sampleOrder.customerId = customerId;
+      secondOrder.customerId = customerId;
 
-      expect(result).toEqual(orders);
-      expect(result.length).toBe(2);
-      expect(result[0].customerId).toBe(customerId);
+      const paginatedResult: PaginatedResult<Order> = {
+        data: [sampleOrder, secondOrder],
+        total: 2,
+        page: 1,
+        limit: 10,
+        pages: 1,
+      };
+
+      jest
+        .spyOn(elasticsearchService, 'findByCustomer')
+        .mockResolvedValue(paginatedResult);
+
+      const result = await service.findByCustomer(customerId, paginationDto);
+
+      expect(result.data.length).toBe(2);
+      expect(result.data[0].customerId).toBe(customerId);
+      expect(result).toEqual(paginatedResult);
     });
 
-    it('should return customer orders from PostgreSQL when Elasticsearch fails', async () => {
+    it('should fall back to PostgresService when ElasticsearchService fails', async () => {
       const customerId = 'customer-123';
-      const orders = [
-        { ...sampleOrder, customerId, source: 'postgresql' },
-        { ...sampleOrder, customerId, uuid: 'order-2', source: 'postgresql' },
-      ] as TestOrder[];
+      const paginationDto = new PaginationDto();
 
-      elasticsearchService.findByCustomer.mockRejectedValue(new Error());
-      postgresService.findByCustomer.mockResolvedValue(orders);
+      sampleOrder.customerId = customerId;
 
-      const result = await service.findByCustomer(customerId);
+      const paginatedResult: PaginatedResult<Order> = {
+        data: [sampleOrder],
+        total: 1,
+        page: 1,
+        limit: 10,
+        pages: 1,
+      };
 
-      expect(result).toEqual(orders);
-      expect((result[0] as TestOrder).source).toBe('postgresql');
+      jest
+        .spyOn(elasticsearchService, 'findByCustomer')
+        .mockRejectedValue(new Error('Connection failed'));
+      jest
+        .spyOn(postgresService, 'findByCustomer')
+        .mockResolvedValue(paginatedResult);
+
+      const result = await service.findByCustomer(customerId, paginationDto);
+
+      expect(result.data.length).toBe(1);
+      expect(result.total).toBe(1);
+      expect(result).toEqual(paginatedResult);
+    });
+
+    it('should pass pagination and customer parameters correctly', async () => {
+      const customerId = 'customer-456';
+      const paginationDto: PaginationDto = { page: 3, limit: 5 };
+
+      const paginatedResult: PaginatedResult<Order> = {
+        data: [],
+        total: 0,
+        page: 3,
+        limit: 5,
+        pages: 0,
+      };
+
+      jest
+        .spyOn(elasticsearchService, 'findByCustomer')
+        .mockResolvedValue(paginatedResult);
+
+      await service.findByCustomer(customerId, paginationDto);
+
+      expect(elasticsearchService.findByCustomer).toHaveBeenCalledWith(
+        customerId,
+        paginationDto,
+      );
     });
   });
 });

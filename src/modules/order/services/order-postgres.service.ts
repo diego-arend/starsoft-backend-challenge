@@ -10,14 +10,17 @@ import {
   createOrderItems,
   calculateOrderTotal,
   canOrderBeModified,
-  formatErrorMessage,
 } from '../helpers/order.helpers';
+import { logOrderError } from '../helpers/logger.helpers'; // Adicionar importação da função helper
 import {
   OrderNotFoundException,
   OrderNotModifiableException,
   OrderCreationFailedException,
   OrderUpdateFailedException,
 } from '../exceptions/postgres-exceptions';
+import { PaginationDto } from '../../../common/dto/pagination.dto';
+import { PaginatedResult } from '../../../common/interfaces/paginated-result.interface';
+import { PaginationService } from '../../../common/services/pagination.service';
 
 /**
  * Service for handling order operations in PostgreSQL database
@@ -26,11 +29,12 @@ import {
 export class OrderPostgresService {
   constructor(
     @InjectRepository(Order)
-    private orderRepository: Repository<Order>,
+    private readonly orderRepository: Repository<Order>,
     @InjectRepository(OrderItem)
     private orderItemRepository: Repository<OrderItem>,
     private dataSource: DataSource,
     private readonly logger: LoggerService,
+    private readonly paginationService: PaginationService,
   ) {}
 
   /**
@@ -45,10 +49,8 @@ export class OrderPostgresService {
     await queryRunner.startTransaction();
 
     try {
-      // Calculate order total
       const total = calculateOrderTotal(createOrderDto.items);
 
-      // Create order
       const order = queryRunner.manager.create(Order, {
         customerId: createOrderDto.customerId,
         status: OrderStatus.PENDING,
@@ -57,22 +59,18 @@ export class OrderPostgresService {
 
       const savedOrder = await queryRunner.manager.save(order);
 
-      // Create order items
       const orderItems = createOrderItems(createOrderDto.items, savedOrder.id);
       await queryRunner.manager.save(OrderItem, orderItems);
 
-      // Commit transaction
       await queryRunner.commitTransaction();
 
-      // Fetch complete order with items
       return this.findOneByUuid(savedOrder.uuid);
     } catch (error) {
-      // Rollback in case of error
       await queryRunner.rollbackTransaction();
-      this.logError('create', error);
+
+      logOrderError(this.logger, 'create', error, 'OrderPostgresService');
       throw new OrderCreationFailedException(error);
     } finally {
-      // Release the query runner
       await queryRunner.release();
     }
   }
@@ -82,11 +80,25 @@ export class OrderPostgresService {
    *
    * @returns Array of orders with their items
    */
-  async findAll(): Promise<Order[]> {
-    return this.orderRepository.find({
-      relations: ['items'],
+  async findAll(
+    paginationDto: PaginationDto = {},
+  ): Promise<PaginatedResult<Order>> {
+    const { page, limit, skip } =
+      this.paginationService.getPaginationParams(paginationDto);
+
+    const [orders, total] = await this.orderRepository.findAndCount({
+      take: limit,
+      skip,
       order: { createdAt: 'DESC' },
+      relations: ['items'],
     });
+
+    return this.paginationService.createPaginatedResult(
+      orders,
+      total,
+      page,
+      limit,
+    );
   }
 
   /**
@@ -135,10 +147,8 @@ export class OrderPostgresService {
    * @returns Updated order
    */
   async update(uuid: string, updateOrderDto: UpdateOrderDto): Promise<Order> {
-    // First find the order
     const order = await this.findOneByUuid(uuid);
 
-    // Check if the order can be modified before proceeding
     if (!canOrderBeModified(order)) {
       throw new OrderNotModifiableException(order.status);
     }
@@ -151,11 +161,11 @@ export class OrderPostgresService {
       await this.processOrderUpdate(queryRunner, order, updateOrderDto);
       await queryRunner.commitTransaction();
 
-      // Fetch the complete updated order
       return this.findOneByUuid(uuid);
     } catch (error) {
       await queryRunner.rollbackTransaction();
-      this.logError('update', error);
+
+      logOrderError(this.logger, 'update', error, 'OrderPostgresService');
       throw new OrderUpdateFailedException(error);
     } finally {
       await queryRunner.release();
@@ -169,20 +179,16 @@ export class OrderPostgresService {
    * @returns Canceled order
    */
   async cancel(uuid: string): Promise<Order> {
-    // Find the order by UUID
     const order = await this.findOneByUuid(uuid);
 
-    // Check if the order can be modified
     if (!canOrderBeModified(order)) {
       throw new OrderNotModifiableException(order.status);
     }
 
-    // Update status to CANCELED using numeric ID
     await this.orderRepository.update(order.id, {
       status: OrderStatus.CANCELED,
     });
 
-    // Fetch the complete canceled order
     return this.findOneByUuid(uuid);
   }
 
@@ -192,12 +198,27 @@ export class OrderPostgresService {
    * @param customerId Customer ID
    * @returns Array of customer orders
    */
-  async findByCustomer(customerId: string): Promise<Order[]> {
-    return this.orderRepository.find({
+  async findByCustomer(
+    customerId: string,
+    paginationDto: PaginationDto = {},
+  ): Promise<PaginatedResult<Order>> {
+    const { page, limit, skip } =
+      this.paginationService.getPaginationParams(paginationDto);
+
+    const [orders, total] = await this.orderRepository.findAndCount({
       where: { customerId },
-      relations: ['items'],
+      take: limit,
+      skip,
       order: { createdAt: 'DESC' },
+      relations: ['items'],
     });
+
+    return this.paginationService.createPaginatedResult(
+      orders,
+      total,
+      page,
+      limit,
+    );
   }
 
   /**
@@ -212,19 +233,16 @@ export class OrderPostgresService {
     order: Order,
     updateOrderDto: UpdateOrderDto,
   ): Promise<void> {
-    // Update items if provided
     if (updateOrderDto.items && updateOrderDto.items.length > 0) {
       await this.updateOrderItems(queryRunner, order.id, updateOrderDto.items);
     }
 
-    // Update status if provided
     if (updateOrderDto.status) {
       await queryRunner.manager.update(Order, order.id, {
         status: updateOrderDto.status,
       });
     }
 
-    // Update customer if provided
     if (updateOrderDto.customerId) {
       await queryRunner.manager.update(Order, order.id, {
         customerId: updateOrderDto.customerId,
@@ -244,31 +262,13 @@ export class OrderPostgresService {
     orderId: number,
     items: any[],
   ): Promise<void> {
-    // Remove existing items
     await queryRunner.manager.delete(OrderItem, { orderId });
 
-    // Calculate new total
     const total = calculateOrderTotal(items);
 
-    // Create new items
     const orderItems = createOrderItems(items, orderId);
     await queryRunner.manager.save(OrderItem, orderItems);
 
-    // Update order total
     await queryRunner.manager.update(Order, orderId, { total });
-  }
-
-  /**
-   * Logs an error
-   *
-   * @param operation Operation that failed
-   * @param error Error
-   */
-  private logError(operation: string, error: any): void {
-    this.logger.error(
-      formatErrorMessage(operation, error),
-      error.stack,
-      'OrderPostgresService',
-    );
   }
 }

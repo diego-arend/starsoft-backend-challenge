@@ -9,6 +9,8 @@ import { OrderElasticsearchService } from './services/order-elasticsearch.servic
 import { OrderPostgresService } from './services/order-postgres.service';
 import { emitOrderEvent } from './helpers/event.helpers';
 import { logOrderError } from './helpers/logger.helpers';
+import { PaginatedResult } from '../../common/interfaces/paginated-result.interface';
+import { PaginationDto } from 'src/common/dto/pagination.dto';
 
 /**
  * Main service that orchestrates order operations between data sources
@@ -44,17 +46,19 @@ export class OrderService {
   }
 
   /**
-   * Finds all orders using Elasticsearch with database fallback
+   * Finds all orders using Elasticsearch with database fallback, with pagination
    */
-  async findAll(): Promise<Order[]> {
+  async findAll(
+    paginationDto: PaginationDto = {},
+  ): Promise<PaginatedResult<Order>> {
     try {
-      return await this.orderElasticsearchService.findAll();
+      return await this.orderElasticsearchService.findAll(paginationDto);
     } catch (error) {
       this.logger.warn(
         'Falling back to database for orders retrieval',
         'OrderService',
       );
-      return this.orderPostgresService.findAll();
+      return this.orderPostgresService.findAll(paginationDto);
     }
   }
 
@@ -151,18 +155,27 @@ export class OrderService {
   }
 
   /**
-   * Find orders by customer ID
+   * Find orders by customer ID with pagination
    */
-  async findByCustomer(customerId: string): Promise<Order[]> {
+  async findByCustomer(
+    customerId: string,
+    paginationDto: PaginationDto = {},
+  ): Promise<PaginatedResult<Order>> {
     try {
-      return await this.orderElasticsearchService.findByCustomer(customerId);
+      return await this.orderElasticsearchService.findByCustomer(
+        customerId,
+        paginationDto,
+      );
     } catch (error) {
       this.logger.warn(
         `Falling back to database for customer orders retrieval: ${error.message}`,
         'OrderService',
       );
 
-      return this.orderPostgresService.findByCustomer(customerId);
+      return this.orderPostgresService.findByCustomer(
+        customerId,
+        paginationDto,
+      );
     }
   }
 }

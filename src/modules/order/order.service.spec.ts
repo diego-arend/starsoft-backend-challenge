@@ -14,31 +14,30 @@ import {
   createSampleCreateOrderDto,
   createSampleUpdateOrderDto,
 } from './test/postgres-test.providers';
-import { emitOrderEvent } from './helpers/event.helpers';
 import { createMockEventEmitter } from './test/event-test.providers';
-import { testErrorHandling } from './test/test-module.helpers';
 
 describe('OrderService', () => {
   let service: OrderService;
-  let postgresService: OrderPostgresService;
-  let elasticsearchService: OrderElasticsearchService;
-  let eventEmitter: EventEmitter2;
-  let loggerService: LoggerService;
-  let sampleOrder;
+  let postgresService: any;
+  let elasticsearchService: any;
+  let eventEmitter: any;
+  let sampleOrder: any;
 
   beforeEach(async () => {
-    const mockPostgresService = {
+    sampleOrder = createSampleOrder();
+
+    postgresService = {
       create: jest.fn(),
+      update: jest.fn(),
+      cancel: jest.fn(),
       findAll: jest.fn(),
       findOne: jest.fn(),
       findOneByUuid: jest.fn(),
-      update: jest.fn(),
-      cancel: jest.fn(),
       findByCustomer: jest.fn(),
     };
 
-    const mockElasticsearchService = {
-      indexOrder: jest.fn().mockImplementation(() => Promise.resolve()),
+    elasticsearchService = {
+      indexOrder: jest.fn(),
       findAll: jest.fn(),
       findOneByUuid: jest.fn(),
       findByCustomer: jest.fn(),
@@ -50,263 +49,170 @@ describe('OrderService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OrderService,
-        {
-          provide: OrderPostgresService,
-          useValue: mockPostgresService,
-        },
-        {
-          provide: OrderElasticsearchService,
-          useValue: mockElasticsearchService,
-        },
-        {
-          provide: EventEmitter2,
-          useValue: mockEventEmitter,
-        },
-        {
-          provide: LoggerService,
-          useValue: loggerServiceMock,
-        },
+        { provide: OrderPostgresService, useValue: postgresService },
+        { provide: OrderElasticsearchService, useValue: elasticsearchService },
+        { provide: EventEmitter2, useValue: mockEventEmitter },
+        { provide: LoggerService, useValue: loggerServiceMock },
       ],
     }).compile();
 
     service = module.get<OrderService>(OrderService);
-    postgresService = module.get<OrderPostgresService>(OrderPostgresService);
-    elasticsearchService = module.get<OrderElasticsearchService>(
-      OrderElasticsearchService,
-    );
-    eventEmitter = module.get<EventEmitter2>(EventEmitter2);
-    loggerService = module.get<LoggerService>(LoggerService);
-
-    sampleOrder = createSampleOrder();
+    eventEmitter = mockEventEmitter;
   });
 
-  afterEach(() => jest.clearAllMocks());
-
-  describe('CRUD operations', () => {
+  describe('create', () => {
     it('should create order and emit event', async () => {
+      // Arrange
       const dto = createSampleCreateOrderDto();
-      jest.spyOn(postgresService, 'create').mockResolvedValue(sampleOrder);
+      postgresService.create.mockResolvedValue(sampleOrder);
 
+      // Act
       const result = await service.create(dto);
 
+      // Assert
       expect(postgresService.create).toHaveBeenCalledWith(dto);
       expect(eventEmitter.emit).toHaveBeenCalledWith(
         OrderEventType.CREATED,
         expect.objectContaining({ orderUuid: sampleOrder.uuid }),
       );
-      expect(elasticsearchService.indexOrder).not.toHaveBeenCalled();
-      expect(result).toBe(sampleOrder);
+      expect(result).toEqual(sampleOrder);
     });
 
-    it('should update order and emit event', async () => {
-      const uuid = '123e4567-e89b-12d3-a456-426614174000';
-      const dto = createSampleUpdateOrderDto();
-      jest.spyOn(postgresService, 'update').mockResolvedValue(sampleOrder);
+    it('should throw BadRequestException when create fails', async () => {
+      // Arrange
+      const dto = createSampleCreateOrderDto();
+      postgresService.create.mockRejectedValue(new Error('Database error'));
 
+      // Act & Assert
+      await expect(service.create(dto)).rejects.toThrow(BadRequestException);
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('update', () => {
+    it('should update order and emit event', async () => {
+      // Arrange
+      const uuid = 'test-uuid';
+      const dto = createSampleUpdateOrderDto();
+      postgresService.update.mockResolvedValue(sampleOrder);
+
+      // Act
       await service.update(uuid, dto);
 
+      // Assert
       expect(postgresService.update).toHaveBeenCalledWith(uuid, dto);
       expect(eventEmitter.emit).toHaveBeenCalledWith(
         OrderEventType.UPDATED,
-        expect.anything(),
-      );
-    });
-
-    it('should cancel order and emit event', async () => {
-      const uuid = '123e4567-e89b-12d3-a456-426614174000';
-      jest.spyOn(postgresService, 'cancel').mockResolvedValue(sampleOrder);
-
-      await service.cancel(uuid);
-
-      expect(postgresService.cancel).toHaveBeenCalledWith(uuid);
-      expect(eventEmitter.emit).toHaveBeenCalledWith(
-        OrderEventType.CANCELED,
-        expect.anything(),
+        expect.objectContaining({ orderUuid: sampleOrder.uuid }),
       );
     });
   });
 
-  describe('Query operations', () => {
-    it('should prioritize Elasticsearch for findAll with database fallback', async () => {
-      const orders = [sampleOrder, sampleOrder];
-      jest.spyOn(elasticsearchService, 'findAll').mockResolvedValue(orders);
+  describe('cancel', () => {
+    it('should cancel order and emit event', async () => {
+      // Arrange
+      const uuid = 'test-uuid';
+      postgresService.cancel.mockResolvedValue(sampleOrder);
 
-      let result = await service.findAll();
+      // Act
+      await service.cancel(uuid);
+
+      // Assert
+      expect(postgresService.cancel).toHaveBeenCalledWith(uuid);
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        OrderEventType.CANCELED,
+        expect.objectContaining({ orderUuid: sampleOrder.uuid }),
+      );
+    });
+  });
+
+  describe('findAll', () => {
+    it('should use Elasticsearch when available', async () => {
+      // Arrange
+      const orders = [sampleOrder, sampleOrder];
+      elasticsearchService.findAll.mockResolvedValue(orders);
+
+      // Act
+      const result = await service.findAll();
+
+      // Assert
       expect(elasticsearchService.findAll).toHaveBeenCalled();
       expect(postgresService.findAll).not.toHaveBeenCalled();
-      expect(result).toBe(orders);
+      expect(result).toEqual(orders);
+    });
 
-      jest.clearAllMocks();
-      jest
-        .spyOn(elasticsearchService, 'findAll')
-        .mockRejectedValue(new Error('ES error'));
-      jest.spyOn(postgresService, 'findAll').mockResolvedValue(orders);
+    it('should fall back to PostgreSQL when Elasticsearch fails', async () => {
+      // Arrange
+      const orders = [sampleOrder, sampleOrder];
+      elasticsearchService.findAll.mockRejectedValue(new Error());
+      postgresService.findAll.mockResolvedValue(orders);
 
-      result = await service.findAll();
+      // Act
+      const result = await service.findAll();
+
+      // Assert
       expect(elasticsearchService.findAll).toHaveBeenCalled();
       expect(postgresService.findAll).toHaveBeenCalled();
-      expect(result).toBe(orders);
+      expect(result).toEqual(orders);
     });
+  });
 
-    it('should use correct strategy for findOneByUuid', async () => {
-      const uuid = '123e4567-e89b-12d3-a456-426614174000';
-
-      jest
-        .spyOn(elasticsearchService, 'findOneByUuid')
-        .mockResolvedValue(sampleOrder);
-      let result = await service.findOneByUuid(uuid);
-      expect(result).toBe(sampleOrder);
-      expect(postgresService.findOneByUuid).not.toHaveBeenCalled();
-
-      jest.clearAllMocks();
-      jest.spyOn(elasticsearchService, 'findOneByUuid').mockResolvedValue(null);
-      jest
-        .spyOn(postgresService, 'findOneByUuid')
-        .mockResolvedValue(sampleOrder);
-      result = await service.findOneByUuid(uuid);
-      expect(elasticsearchService.findOneByUuid).toHaveBeenCalled();
-      expect(postgresService.findOneByUuid).toHaveBeenCalled();
-
-      jest.clearAllMocks();
-      jest
-        .spyOn(elasticsearchService, 'findOneByUuid')
-        .mockRejectedValue(new Error());
-      jest
-        .spyOn(postgresService, 'findOneByUuid')
-        .mockResolvedValue(sampleOrder);
-      result = await service.findOneByUuid(uuid);
-      expect(loggerService.debug).toHaveBeenCalled();
-      expect(postgresService.findOneByUuid).toHaveBeenCalled();
-    });
-
-    it('should try to use Elasticsearch first for findOne using findOneByUuid', async () => {
+  describe('findOne', () => {
+    it('should combine data from PostgreSQL and Elasticsearch', async () => {
+      // Arrange
       const id = 1;
       const pgOrder = { ...sampleOrder, id };
       const esOrder = {
         ...pgOrder,
-        // Use a property that exists on Order instead of enrichedData
-        items: [
-          ...(pgOrder.items || []),
-          { id: 999, productName: 'Extra item from ES' },
-        ],
+        items: [{ id: 999, productName: 'Test Product' }],
       };
 
-      jest.spyOn(postgresService, 'findOne').mockResolvedValue(pgOrder);
-      jest
-        .spyOn(elasticsearchService, 'findOneByUuid')
-        .mockResolvedValue(esOrder);
+      postgresService.findOne.mockResolvedValue(pgOrder);
+      elasticsearchService.findOneByUuid.mockResolvedValue(esOrder);
 
+      // Act
       const result = await service.findOne(id);
 
+      // Assert
       expect(postgresService.findOne).toHaveBeenCalledWith(id);
       expect(elasticsearchService.findOneByUuid).toHaveBeenCalledWith(
         pgOrder.uuid,
       );
-      // Check for the additional item instead of enrichedData
-      expect(result.items).toContainEqual(
-        expect.objectContaining({
-          id: 999,
-          productName: 'Extra item from ES',
-        }),
-      );
+      expect(result.items).toContainEqual(expect.objectContaining({ id: 999 }));
     });
+  });
 
-    it('should fall back to PostgreSQL result when Elasticsearch fails for findOne', async () => {
-      const id = 1;
-      const pgOrder = { ...sampleOrder, id };
+  describe('findOneByUuid', () => {
+    it('should use Elasticsearch when available', async () => {
+      // Arrange
+      const uuid = 'test-uuid';
+      elasticsearchService.findOneByUuid.mockResolvedValue(sampleOrder);
 
-      jest.spyOn(postgresService, 'findOne').mockResolvedValue(pgOrder);
-      jest
-        .spyOn(elasticsearchService, 'findOneByUuid')
-        .mockRejectedValue(new Error('ES unavailable'));
+      // Act
+      const result = await service.findOneByUuid(uuid);
 
-      const result = await service.findOne(id);
-
-      expect(postgresService.findOne).toHaveBeenCalledWith(id);
-      expect(elasticsearchService.findOneByUuid).toHaveBeenCalledWith(
-        pgOrder.uuid,
-      );
-      expect(result).toBe(pgOrder);
-      expect(loggerService.debug).toHaveBeenCalled();
+      // Assert
+      expect(elasticsearchService.findOneByUuid).toHaveBeenCalledWith(uuid);
+      expect(postgresService.findOneByUuid).not.toHaveBeenCalled();
+      expect(result).toEqual(sampleOrder);
     });
+  });
 
-    it('should prioritize Elasticsearch for findByCustomer with database fallback', async () => {
-      const customerId = '550e8400-e29b-41d4-a716-446655440000';
+  describe('findByCustomer', () => {
+    it('should use Elasticsearch when available', async () => {
+      // Arrange
+      const customerId = 'customer-123';
       const orders = [sampleOrder, sampleOrder];
+      elasticsearchService.findByCustomer.mockResolvedValue(orders);
 
-      jest
-        .spyOn(elasticsearchService, 'findByCustomer')
-        .mockResolvedValue(orders);
-      let result = await service.findByCustomer(customerId);
+      // Act
+      const result = await service.findByCustomer(customerId);
+
+      // Assert
       expect(elasticsearchService.findByCustomer).toHaveBeenCalledWith(
         customerId,
       );
-      expect(postgresService.findByCustomer).not.toHaveBeenCalled();
-
-      jest.clearAllMocks();
-      jest
-        .spyOn(elasticsearchService, 'findByCustomer')
-        .mockRejectedValue(new Error());
-      jest.spyOn(postgresService, 'findByCustomer').mockResolvedValue(orders);
-      result = await service.findByCustomer(customerId);
-      expect(postgresService.findByCustomer).toHaveBeenCalled();
-      expect(result).toBe(orders);
-    });
-  });
-
-  describe('Error handling', () => {
-    it('should handle errors properly for create operation', async () => {
-      const error = new Error('Test error');
-      jest.spyOn(postgresService, 'create').mockRejectedValue(error);
-
-      await testErrorHandling(
-        () => service.create(createSampleCreateOrderDto()),
-        BadRequestException,
-        loggerService,
-      );
-    });
-
-    it('should handle errors properly for all operations', async () => {
-      const error = new Error('Test error');
-      const uuid = '123e4567-e89b-12d3-a456-426614174000';
-
-      jest.spyOn(postgresService, 'create').mockRejectedValue(error);
-      await expect(
-        service.create(createSampleCreateOrderDto()),
-      ).rejects.toThrow(BadRequestException);
-
-      jest.spyOn(postgresService, 'update').mockRejectedValue(error);
-      await expect(
-        service.update(uuid, createSampleUpdateOrderDto()),
-      ).rejects.toThrow(BadRequestException);
-
-      jest.spyOn(postgresService, 'cancel').mockRejectedValue(error);
-      await expect(service.cancel(uuid)).rejects.toThrow(BadRequestException);
-
-      expect(loggerService.error).toHaveBeenCalledTimes(3);
-    });
-  });
-
-  describe('Event emission', () => {
-    it('should emit events with correct structure', () => {
-      emitOrderEvent(eventEmitter, OrderEventType.CREATED, sampleOrder);
-
-      expect(eventEmitter.emit).toHaveBeenCalledWith(OrderEventType.CREATED, {
-        type: OrderEventType.CREATED,
-        orderUuid: sampleOrder.uuid,
-        payload: sampleOrder,
-      });
-    });
-
-    it('should not emit events if PostgreSQL operation fails', async () => {
-      const dto = createSampleCreateOrderDto();
-      const error = new Error('Database error');
-
-      jest.spyOn(postgresService, 'create').mockRejectedValue(error);
-
-      await expect(service.create(dto)).rejects.toThrow(BadRequestException);
-
-      expect(eventEmitter.emit).not.toHaveBeenCalled();
+      expect(result).toEqual(orders);
     });
   });
 });

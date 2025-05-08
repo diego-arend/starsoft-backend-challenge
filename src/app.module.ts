@@ -10,6 +10,7 @@ import { TraceIdInterceptor } from './interceptors/trace-id.interceptor';
 import { ElasticSearchModule } from './infraestructure/elastic/elastic.module';
 import { getTypeOrmConfig } from './infraestructure/postgress/dataSource';
 import { OrderModule } from './modules/order/order.module';
+import { SearchModule } from './modules/search/search.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { OrderModule } from './modules/order/order.module';
     LoggerModule,
     ElasticSearchModule,
     OrderModule,
+    SearchModule,
   ],
   controllers: [AppController],
   providers: [

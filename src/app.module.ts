@@ -11,6 +11,7 @@ import { ElasticSearchModule } from './infraestructure/elastic/elastic.module';
 import { getTypeOrmConfig } from './infraestructure/postgress/dataSource';
 import { OrderModule } from './modules/order/order.module';
 import { SearchModule } from './modules/search/search.module';
+import { CommonModule } from './common/common.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { SearchModule } from './modules/search/search.module';
     ElasticSearchModule,
     OrderModule,
     SearchModule,
+    CommonModule,
   ],
   controllers: [AppController],
   providers: [

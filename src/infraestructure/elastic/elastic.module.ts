@@ -35,6 +35,6 @@ import { ElasticSearchService } from './elastic.service';
       inject: [ConfigService],
     },
   ],
-  exports: [ElasticSearchRepository, ElasticSearchService],
+  exports: [ElasticSearchService],
 })
 export class ElasticSearchModule {}

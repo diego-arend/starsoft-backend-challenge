@@ -1,34 +1,36 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { EventEmitterModule } from '@nestjs/event-emitter';
-import { ElasticsearchModule } from '@nestjs/elasticsearch';
-import { OrderService } from './order.service';
 import { OrderController } from './order.controller';
+import { OrderService } from './order.service';
+import { OrderPostgresService } from './services/order-postgres.service';
+import { OrderElasticsearchService } from './services/order-elasticsearch.service';
+import { OrderReconciliationService } from './services/order-reconciliation.service';
 import { Order } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
 import { OrderReconciliation } from './entities/order-reconciliation.entity';
+import { APP_FILTER } from '@nestjs/core';
+import { OrderExceptionFilter } from './filters/order-exception.filter';
 import { LoggerModule } from '../../logger/logger.module';
-import { OrderElasticsearchService } from './services/order-elasticsearch.service';
-import { OrderPostgresService } from './services/order-postgres.service';
-import { OrderEventListener } from './events/order-event.listener';
-import { OrderReconciliationService } from './services/order-reconciliation.service';
+import { ElasticsearchConfigModule } from '../../infraestructure/elasticsearch/elasticsearch.module';
+import { OrderEventsListener } from './listeners/order-events.listener';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Order, OrderItem, OrderReconciliation]),
-    ElasticsearchModule.register({
-      node: process.env.ELASTICSEARCH_NODE || 'http://elasticsearch:9200',
-    }),
     LoggerModule,
-    EventEmitterModule.forRoot(),
+    ElasticsearchConfigModule,
   ],
   controllers: [OrderController],
   providers: [
     OrderService,
-    OrderElasticsearchService,
     OrderPostgresService,
-    OrderEventListener,
+    OrderElasticsearchService,
     OrderReconciliationService,
+    OrderEventsListener,
+    {
+      provide: APP_FILTER,
+      useClass: OrderExceptionFilter,
+    },
   ],
   exports: [OrderService],
 })

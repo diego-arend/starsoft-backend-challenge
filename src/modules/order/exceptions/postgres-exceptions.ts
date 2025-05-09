@@ -1,35 +1,51 @@
-import { HttpStatus } from '@nestjs/common';
+import { HttpException, HttpStatus } from '@nestjs/common';
 import { BaseException } from '../../../common/exceptions/base.exception';
-import { OrderStatus } from '../entities/order.entity';
 
 /**
- * Exceção lançada quando um pedido não é encontrado
+ * Exception thrown when an order is not found
+ * This represents normal behavior (resource not found) rather than a system error
  */
-export class OrderNotFoundException extends BaseException {
+export class OrderNotFoundException extends HttpException {
+  /**
+   * Creates a new OrderNotFoundException
+   *
+   * @param identifier - UUID or ID of the order that was not found
+   */
   constructor(identifier: string | number) {
     const isUuid = typeof identifier === 'string';
     const message = `Order with ${isUuid ? 'UUID' : 'ID'} ${identifier} not found`;
-    super(message, HttpStatus.NOT_FOUND, 'ORDER_NOT_FOUND');
-  }
-}
 
-/**
- * Exceção lançada quando um pedido não pode ser modificado
- */
-export class OrderNotModifiableException extends BaseException {
-  constructor(status: OrderStatus) {
     super(
-      `Order with status ${status} cannot be modified`,
-      HttpStatus.BAD_REQUEST,
-      'ORDER_NOT_MODIFIABLE',
+      {
+        message,
+        statusCode: HttpStatus.NOT_FOUND,
+        errorCode: 'ORDER_NOT_FOUND',
+        timestamp: new Date().toISOString(),
+      },
+      HttpStatus.NOT_FOUND,
     );
   }
 }
 
 /**
- * Exceção lançada quando a criação de um pedido falha
+ * Exception thrown when an order cannot be modified because of its current status
+ */
+export class OrderNotModifiableException extends Error {
+  constructor(status: string) {
+    super(`Order with status ${status} cannot be modified`);
+    this.name = 'OrderNotModifiableException';
+  }
+}
+
+/**
+ * Exception thrown when order creation fails
  */
 export class OrderCreationFailedException extends BaseException {
+  /**
+   * Creates a new OrderCreationFailedException
+   *
+   * @param details - Additional error details
+   */
   constructor(details: any) {
     super(
       'Failed to create order',
@@ -41,9 +57,14 @@ export class OrderCreationFailedException extends BaseException {
 }
 
 /**
- * Exceção lançada quando a atualização de um pedido falha
+ * Exception thrown when order update fails
  */
 export class OrderUpdateFailedException extends BaseException {
+  /**
+   * Creates a new OrderUpdateFailedException
+   *
+   * @param details - Additional error details
+   */
   constructor(details: any) {
     super(
       'Failed to update order',
@@ -55,9 +76,14 @@ export class OrderUpdateFailedException extends BaseException {
 }
 
 /**
- * Exceção lançada quando os itens do pedido são inválidos
+ * Exception thrown when order items are invalid
  */
 export class InvalidOrderItemsException extends BaseException {
+  /**
+   * Creates a new InvalidOrderItemsException
+   *
+   * @param details - Information about the invalid items
+   */
   constructor(details: any) {
     super(
       'Invalid order items provided',
@@ -69,9 +95,15 @@ export class InvalidOrderItemsException extends BaseException {
 }
 
 /**
- * Exceção lançada quando uma transação de banco de dados falha
+ * Exception thrown when a database transaction fails
  */
 export class DatabaseTransactionFailedException extends BaseException {
+  /**
+   * Creates a new DatabaseTransactionFailedException
+   *
+   * @param operation - Database operation that failed
+   * @param details - Additional error details
+   */
   constructor(operation: string, details: any) {
     super(
       `Database transaction failed during ${operation}`,
@@ -89,9 +121,9 @@ export class OrderEventFailedException extends BaseException {
   /**
    * Creates a new OrderEventFailedException
    *
-   * @param eventType Type of event that failed (created, updated, etc.)
-   * @param orderUuid UUID of the order for which the event failed
-   * @param details Additional error details
+   * @param eventType - Type of event that failed (created, updated, etc.)
+   * @param orderUuid - UUID of the order for which the event failed
+   * @param details - Additional error details
    */
   constructor(eventType: string, orderUuid: string, details: any) {
     super(
@@ -110,8 +142,8 @@ export class OrderCancellationFailedException extends BaseException {
   /**
    * Creates a new OrderCancellationFailedException
    *
-   * @param orderUuid UUID of the order that failed to be canceled
-   * @param details Additional error details
+   * @param orderUuid - UUID of the order that failed to be canceled
+   * @param details - Additional error details
    */
   constructor(orderUuid: string, details: any) {
     super(
@@ -130,8 +162,8 @@ export class OrderValidationException extends BaseException {
   /**
    * Creates a new OrderValidationException
    *
-   * @param message Detailed validation error message
-   * @param details Additional error details
+   * @param message - Detailed validation error message
+   * @param details - Additional error details
    */
   constructor(message: string, details: any) {
     super(message, HttpStatus.BAD_REQUEST, 'ORDER_VALIDATION_FAILED', details);

@@ -186,3 +186,34 @@ export function createSampleElasticsearchResponse(): any {
     },
   };
 }
+
+/**
+ * Creates a mock search response with the provided documents
+ * @param documents Documents to include in the search response
+ * @returns Elasticsearch search response with the documents
+ */
+export function createSearchResponseWith(documents: any[]) {
+  return {
+    took: 5,
+    timed_out: false,
+    _shards: {
+      total: 1,
+      successful: 1,
+      failed: 0,
+      skipped: 0,
+    },
+    hits: {
+      total: {
+        value: documents.length,
+        relation: 'eq',
+      },
+      max_score: 1.0,
+      hits: documents.map((doc, index) => ({
+        _index: 'orders',
+        _id: doc.uuid || `doc-${index}`,
+        _score: 1.0,
+        _source: doc,
+      })),
+    },
+  };
+}

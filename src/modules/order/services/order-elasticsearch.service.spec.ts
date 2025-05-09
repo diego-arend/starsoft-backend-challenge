@@ -1,49 +1,35 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ElasticsearchService } from '@nestjs/elasticsearch';
 import { LoggerService } from '../../../logger/logger.service';
 import { OrderElasticsearchService } from './order-elasticsearch.service';
-import { OrderReconciliationService } from './order-reconciliation.service';
-import { PaginationService } from '../../../common/services/pagination.service';
+import { PaginationDto } from '../../../common/dto/pagination.dto';
+import { ElasticsearchService } from '@nestjs/elasticsearch';
 import {
   createMockLoggerService,
   createSampleOrder,
 } from '../test/test.providers';
+import { createEmptySearchResponse } from '../test/elasticsearch-test.providers';
 import {
-  createMockElasticsearchService,
-  createEmptySearchResponse,
-  createSearchErrorResponse,
-} from '../test/elasticsearch-test.providers';
-import { ElasticsearchSearchException } from '../exceptions/elasticsearch-exceptions';
-import { createMockReconciliationService } from '../test/reconciliation-test.providers';
-import { PaginationDto } from '../../../common/dto/pagination.dto';
+  ElasticsearchSearchException,
+  ElasticsearchNotFoundException,
+} from '../../../common/exceptions/elasticsearch-exceptions';
+import { Logger, NotFoundException } from '@nestjs/common';
 
 describe('OrderElasticsearchService', () => {
   let service: OrderElasticsearchService;
   let elasticsearchService: ElasticsearchService;
-  let loggerService: LoggerService;
-  let reconciliationService: OrderReconciliationService;
-  let paginationService: PaginationService;
+
+  const sampleOrder = createSampleOrder();
+  const orderUuid = sampleOrder.uuid;
+  const customerId = sampleOrder.customerId;
 
   beforeEach(async () => {
-    const elasticsearchServiceMock = createMockElasticsearchService();
-    const loggerServiceMock = createMockLoggerService();
-    const reconciliationServiceMock = createMockReconciliationService();
-    const paginationServiceMock = {
-      getElasticsearchPaginationParams: jest.fn().mockReturnValue({
-        from: 0,
-        size: 10,
-        page: 1,
-        limit: 10,
+    const mockElasticsearchService = {
+      search: jest.fn(),
+      index: jest.fn().mockResolvedValue({
+        result: 'created',
+        _id: orderUuid,
       }),
-      createPaginatedResult: jest
-        .fn()
-        .mockImplementation((data, total, page, limit) => ({
-          data,
-          total,
-          page,
-          limit,
-          pages: Math.ceil(total / limit),
-        })),
+      count: jest.fn().mockResolvedValue({ count: 10 }),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -51,19 +37,20 @@ describe('OrderElasticsearchService', () => {
         OrderElasticsearchService,
         {
           provide: ElasticsearchService,
-          useValue: elasticsearchServiceMock,
+          useValue: mockElasticsearchService,
         },
         {
           provide: LoggerService,
-          useValue: loggerServiceMock,
+          useValue: createMockLoggerService(),
         },
         {
-          provide: OrderReconciliationService,
-          useValue: reconciliationServiceMock,
-        },
-        {
-          provide: PaginationService,
-          useValue: paginationServiceMock,
+          provide: Logger,
+          useValue: {
+            log: jest.fn(),
+            error: jest.fn(),
+            warn: jest.fn(),
+            debug: jest.fn(),
+          },
         },
       ],
     }).compile();
@@ -71,340 +58,207 @@ describe('OrderElasticsearchService', () => {
     service = module.get<OrderElasticsearchService>(OrderElasticsearchService);
     elasticsearchService =
       module.get<ElasticsearchService>(ElasticsearchService);
-    loggerService = module.get<LoggerService>(LoggerService);
-    reconciliationService = module.get<OrderReconciliationService>(
-      OrderReconciliationService,
-    );
-    paginationService = module.get<PaginationService>(PaginationService);
-  });
-
-  afterEach(() => {
-    jest.clearAllMocks();
-  });
-
-  describe('indexOrder', () => {
-    it('should index order successfully', async () => {
-      const order = createSampleOrder();
-      await service.indexOrder(order);
-
-      expect(elasticsearchService.index).toHaveBeenCalledWith(
-        expect.objectContaining({
-          index: 'orders',
-          id: order.uuid,
-        }),
-      );
-      expect(loggerService.log).toHaveBeenCalled();
-    });
-
-    it('should handle errors during indexing', async () => {
-      const order = createSampleOrder();
-      jest
-        .spyOn(elasticsearchService, 'index')
-        .mockRejectedValue(new Error('Failed to index'));
-
-      await service.indexOrder(order);
-
-      expect(loggerService.error).toHaveBeenCalled();
-
-      expect(reconciliationService.recordFailedOperation).toHaveBeenCalledWith(
-        'index',
-        order.uuid,
-        expect.any(String),
-      );
-    });
-  });
-
-  describe('updateOrder', () => {
-    it('should update existing order', async () => {
-      const order = createSampleOrder();
-      await service.updateOrder(order);
-
-      expect(elasticsearchService.exists).toHaveBeenCalled();
-      expect(elasticsearchService.update).toHaveBeenCalled();
-    });
-
-    it('should index order if it does not exist', async () => {
-      const order = createSampleOrder();
-      jest.spyOn(elasticsearchService, 'exists').mockResolvedValue(false);
-      jest.spyOn(service, 'indexOrder').mockResolvedValue();
-
-      await service.updateOrder(order);
-
-      expect(service.indexOrder).toHaveBeenCalledWith(order);
-    });
-
-    it('should handle errors during update', async () => {
-      const order = createSampleOrder();
-      jest
-        .spyOn(elasticsearchService, 'update')
-        .mockRejectedValue(new Error('Update failed'));
-
-      await service.updateOrder(order);
-
-      expect(loggerService.error).toHaveBeenCalled();
-    });
-  });
-
-  describe('removeOrder', () => {
-    it('should remove order successfully', async () => {
-      const orderUuid = '123e4567-e89b-12d3-a456-426614174000';
-      await service.removeOrder(orderUuid);
-
-      expect(elasticsearchService.delete).toHaveBeenCalledWith({
-        index: 'orders',
-        id: orderUuid,
-      });
-    });
-
-    it('should handle errors during removal', async () => {
-      const orderUuid = '123e4567-e89b-12d3-a456-426614174000';
-      jest
-        .spyOn(elasticsearchService, 'delete')
-        .mockRejectedValue(new Error('Delete failed'));
-
-      await service.removeOrder(orderUuid);
-
-      expect(loggerService.error).toHaveBeenCalled();
-    });
   });
 
   describe('findAll', () => {
-    it('should return paginated orders', async () => {
-      const paginationDto = new PaginationDto();
-      const result = await service.findAll(paginationDto);
+    it('should return paginated results', async () => {
+      const mockResponse = createEmptySearchResponse();
+      mockResponse.hits.total.value = 1;
+      mockResponse.hits.hits = [{ _source: sampleOrder }];
 
-      expect(elasticsearchService.search).toHaveBeenCalled();
+      jest
+        .spyOn(elasticsearchService, 'search')
+        .mockResolvedValue(mockResponse);
 
-      expect(result.data.length).toBe(2);
-      expect(result.total).toBeGreaterThan(0);
+      const result = await service.findAll();
+
+      expect(result.data).toHaveLength(1);
+      expect(result.total).toBe(1);
+      expect(result.data[0].uuid).toBe(sampleOrder.uuid);
+      expect(result.data[0].customerId).toBe(sampleOrder.customerId);
+      expect(result.data[0].status).toBe(sampleOrder.status);
+    });
+
+    it('should return empty result in case of error', async () => {
+      jest
+        .spyOn(elasticsearchService, 'search')
+        .mockRejectedValue(new Error('Search error'));
+
+      const result = await service.findAll();
+
+      expect(result.data).toEqual([]);
+      expect(result.total).toBe(0);
       expect(result.page).toBe(1);
     });
 
-    it('should return empty data array when no orders', async () => {
+    it('should apply pagination parameters', async () => {
       jest
         .spyOn(elasticsearchService, 'search')
         .mockResolvedValue(createEmptySearchResponse());
 
-      const result = await service.findAll();
-
-      expect(result.data.length).toBe(0);
-      expect(result.total).toBe(0);
-    });
-
-    it('should throw exception when search fails', async () => {
-      jest
-        .spyOn(elasticsearchService, 'search')
-        .mockImplementation(createSearchErrorResponse());
-
-      await expect(service.findAll()).rejects.toThrow(
-        ElasticsearchSearchException,
-      );
-    });
-
-    it('should use pagination parameters correctly', async () => {
-      const paginationDto = { page: 2, limit: 15 };
-
-      await service.findAll(paginationDto);
-
-      expect(
-        paginationService.getElasticsearchPaginationParams,
-      ).toHaveBeenCalledWith(paginationDto);
-      expect(elasticsearchService.search).toHaveBeenCalledWith(
-        expect.objectContaining({
-          from: expect.any(Number),
-          size: expect.any(Number),
-        }),
-      );
-    });
-  });
-
-  describe('findByCustomer', () => {
-    it('should return paginated customer orders', async () => {
-      const customerId = '550e8400-e29b-41d4-a716-446655440000';
       const paginationDto = new PaginationDto();
+      paginationDto.page = 2;
+      paginationDto.limit = 5;
 
-      const result = await service.findByCustomer(customerId, paginationDto);
+      const result = await service.findAll(paginationDto);
 
+      expect(result.page).toBe(2);
+      expect(result.limit).toBe(5);
       expect(elasticsearchService.search).toHaveBeenCalledWith(
         expect.objectContaining({
-          query: {
-            match: {
-              customerId: customerId,
-            },
-          },
-        }),
-      );
-
-      expect(result.data.length).toBeGreaterThan(0);
-      expect(result.total).toBeGreaterThan(0);
-      expect(result.page).toBe(1);
-    });
-
-    it('should throw exception when search fails', async () => {
-      const customerId = '550e8400-e29b-41d4-a716-446655440000';
-      jest
-        .spyOn(elasticsearchService, 'search')
-        .mockImplementation(createSearchErrorResponse());
-
-      await expect(service.findByCustomer(customerId)).rejects.toThrow(
-        ElasticsearchSearchException,
-      );
-    });
-
-    it('should use pagination parameters with customer search', async () => {
-      const customerId = '550e8400-e29b-41d4-a716-446655440000';
-      const paginationDto = { page: 3, limit: 5 };
-
-      await service.findByCustomer(customerId, paginationDto);
-
-      expect(
-        paginationService.getElasticsearchPaginationParams,
-      ).toHaveBeenCalledWith(paginationDto);
-      expect(elasticsearchService.search).toHaveBeenCalledWith(
-        expect.objectContaining({
-          from: expect.any(Number),
-          size: expect.any(Number),
-          query: {
-            match: {
-              customerId: customerId,
-            },
-          },
+          from: 5,
+          size: 5,
         }),
       );
     });
   });
 
   describe('findOneByUuid', () => {
-    it('should return order by uuid', async () => {
-      const orderUuid = '123e4567-e89b-12d3-a456-426614174000';
+    it('should return a specific order by UUID', async () => {
+      const mockResponse = createEmptySearchResponse();
+      mockResponse.hits.total.value = 1;
+      mockResponse.hits.hits = [{ _source: sampleOrder }];
 
-      const order = await service.findOneByUuid(orderUuid);
+      jest
+        .spyOn(elasticsearchService, 'search')
+        .mockResolvedValue(mockResponse);
 
-      expect(elasticsearchService.search).toHaveBeenCalledWith(
-        expect.objectContaining({
-          query: {
-            match: {
-              uuid: orderUuid,
-            },
-          },
-        }),
-      );
-      expect(order).toBeDefined();
-      expect(order.uuid).toBe(orderUuid);
+      const result = await service.findOneByUuid(orderUuid);
+
+      expect(result.uuid).toBe(sampleOrder.uuid);
+      expect(result.customerId).toBe(sampleOrder.customerId);
+      expect(result.status).toBe(sampleOrder.status);
+      expect(result.total).toBe(sampleOrder.total);
     });
 
-    it('should return null when order not found', async () => {
-      const orderUuid = 'not-found';
+    it('should throw ElasticsearchNotFoundException when order is not found', async () => {
       jest
         .spyOn(elasticsearchService, 'search')
         .mockResolvedValue(createEmptySearchResponse());
 
-      const order = await service.findOneByUuid(orderUuid);
-
-      expect(order).toBeNull();
+      await expect(service.findOneByUuid('non-existent-uuid')).rejects.toThrow(
+        ElasticsearchNotFoundException,
+      );
     });
 
-    it('should throw ElasticsearchSearchException when search fails', async () => {
-      const orderUuid = '123e4567-e89b-12d3-a456-426614174000';
+    it('should throw ElasticsearchSearchException in case of error', async () => {
       jest
         .spyOn(elasticsearchService, 'search')
-        .mockImplementation(createSearchErrorResponse());
+        .mockRejectedValue(new Error('Search error'));
 
       await expect(service.findOneByUuid(orderUuid)).rejects.toThrow(
         ElasticsearchSearchException,
       );
-
-      expect(loggerService.error).toHaveBeenCalled();
     });
   });
 
-  describe('searchOrders', () => {
-    it('should search with custom query', async () => {
-      const query = { query: { match: { status: 'PENDING' } } };
+  describe('findByCustomer', () => {
+    it('should return customer orders', async () => {
+      const mockResponse = createEmptySearchResponse();
+      mockResponse.hits.total.value = 2;
+      mockResponse.hits.hits = [
+        { _source: { ...sampleOrder, customerId } },
+        { _source: { ...sampleOrder, uuid: 'order-2', customerId } },
+      ];
 
-      await service.searchOrders(query);
+      jest
+        .spyOn(elasticsearchService, 'search')
+        .mockResolvedValue(mockResponse);
 
-      expect(elasticsearchService.search).toHaveBeenCalledWith(
+      const result = await service.findByCustomer(customerId);
+
+      expect(result.data).toHaveLength(2);
+      expect(result.data[0].customerId).toBe(customerId);
+      expect(result.data[1].customerId).toBe(customerId);
+      expect(result.data[1].uuid).toBe('order-2');
+    });
+
+    it('should throw NotFoundException when customer has no orders', async () => {
+      jest
+        .spyOn(elasticsearchService, 'search')
+        .mockResolvedValue(createEmptySearchResponse());
+
+      await expect(
+        service.findByCustomer('customer-without-orders'),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should throw ElasticsearchSearchException in case of error', async () => {
+      jest
+        .spyOn(elasticsearchService, 'search')
+        .mockRejectedValue(new Error('Connection error'));
+
+      await expect(service.findByCustomer(customerId)).rejects.toThrow(
+        ElasticsearchSearchException,
+      );
+    });
+  });
+
+  describe('indexOrder', () => {
+    it('should index an order successfully', async () => {
+      const result = await service.indexOrder(sampleOrder);
+
+      expect(result).toBe(true);
+      expect(elasticsearchService.index).toHaveBeenCalledWith(
         expect.objectContaining({
-          index: 'orders',
-          query: query.query,
+          index: expect.any(String),
+          id: orderUuid,
+          document: expect.anything(),
         }),
       );
     });
 
-    it('should propagate errors', async () => {
-      const query = { query: { match: { status: 'PENDING' } } };
-      jest
-        .spyOn(elasticsearchService, 'search')
-        .mockImplementation(createSearchErrorResponse());
-
-      await expect(service.searchOrders(query)).rejects.toThrow();
-      expect(loggerService.error).toHaveBeenCalled();
-    });
-  });
-
-  describe('reconciliation', () => {
-    it('should record failed operations for reconciliation', async () => {
-      const order = createSampleOrder();
-      jest
-        .spyOn(elasticsearchService, 'update')
-        .mockRejectedValue(new Error('Update failed'));
-
-      await service.updateOrder(order);
-
-      expect(reconciliationService.recordFailedOperation).toHaveBeenCalledWith(
-        'update',
-        order.uuid,
-        expect.any(String),
-      );
-    });
-  });
-
-  describe('reconciliation integration', () => {
-    it('should record failed operation when indexing fails', async () => {
-      const order = createSampleOrder();
+    it('should throw exception in case of indexing error', async () => {
       jest
         .spyOn(elasticsearchService, 'index')
-        .mockRejectedValue(new Error('Index failed'));
+        .mockRejectedValue(new Error('Indexing error'));
 
-      await service.indexOrder(order);
+      await expect(service.indexOrder(sampleOrder)).rejects.toThrow(
+        ElasticsearchSearchException,
+      );
+    });
+  });
 
-      expect(reconciliationService.recordFailedOperation).toHaveBeenCalledWith(
-        'index',
-        order.uuid,
-        expect.any(String),
+  describe('updateOrder', () => {
+    it('should update an order successfully', async () => {
+      const result = await service.updateOrder(sampleOrder);
+
+      expect(result).toBe(true);
+      expect(elasticsearchService.index).toHaveBeenCalledWith(
+        expect.objectContaining({
+          index: expect.any(String),
+          id: orderUuid,
+          document: expect.anything(),
+        }),
       );
     });
 
-    it('should record failed operation when update fails', async () => {
-      const order = createSampleOrder();
-      jest.spyOn(elasticsearchService, 'exists').mockResolvedValue(true);
+    it('should throw exception in case of update error', async () => {
       jest
-        .spyOn(elasticsearchService, 'update')
-        .mockRejectedValue(new Error('Update failed'));
+        .spyOn(elasticsearchService, 'index')
+        .mockRejectedValue(new Error('Update error'));
 
-      await service.updateOrder(order);
-
-      expect(reconciliationService.recordFailedOperation).toHaveBeenCalledWith(
-        'update',
-        order.uuid,
-        expect.any(String),
+      await expect(service.updateOrder(sampleOrder)).rejects.toThrow(
+        ElasticsearchSearchException,
       );
     });
+  });
 
-    it('should record failed operation when removal fails', async () => {
-      const orderUuid = '123e4567-e89b-12d3-a456-426614174000';
+  describe('getTotalDocumentCount', () => {
+    it('should return the total document count', async () => {
+      const result = await service.getTotalDocumentCount();
+
+      expect(result).toBe(10);
+    });
+
+    it('should return 0 in case of error', async () => {
       jest
-        .spyOn(elasticsearchService, 'delete')
-        .mockRejectedValue(new Error('Delete failed'));
+        .spyOn(elasticsearchService, 'count')
+        .mockRejectedValue(new Error('Count error'));
 
-      await service.removeOrder(orderUuid);
+      const result = await service.getTotalDocumentCount();
 
-      expect(reconciliationService.recordFailedOperation).toHaveBeenCalledWith(
-        'delete',
-        orderUuid,
-        expect.any(String),
-      );
+      expect(result).toBe(0);
     });
   });
 });

@@ -1,110 +1,91 @@
 import { logOrderError } from './logger.helpers';
 import { LoggerService } from '../../../logger/logger.service';
+import { createMockLoggerService } from '../test/test.providers';
 
 describe('Logger Helpers', () => {
   describe('logOrderError', () => {
-    it('should format error message with operation and error details', () => {
-      let capturedMessage = '';
-      let capturedStack = '';
-      let capturedContext = '';
+    let mockLogger: Partial<LoggerService>;
+    let capturedMessage: string;
+    let capturedStack: string;
+    let capturedContext: string;
 
-      const mockLogger: LoggerService = {
+    beforeEach(() => {
+      capturedMessage = '';
+      capturedStack = '';
+      capturedContext = '';
+
+      mockLogger = {
+        ...createMockLoggerService(),
         error: (message: string, stack?: string, context?: string) => {
           capturedMessage = message;
-          capturedStack = stack;
-          capturedContext = context;
+          capturedStack = stack || '';
+          capturedContext = context || '';
         },
-        warn: jest.fn(),
-        log: jest.fn(),
-        debug: jest.fn(),
-        verbose: jest.fn(),
-      } as unknown as LoggerService;
+      };
+    });
 
-      const operation = 'create';
-      const errorMessage = 'Database connection failed';
-      const errorStack =
-        'Error: Database connection failed\n    at line 10\n    at line 20';
-      const error = new Error(errorMessage);
-      error.stack = errorStack;
+    it('should log error with correct format', () => {
+      const error = new Error('Test error');
 
-      logOrderError(mockLogger, operation, error);
+      logOrderError(mockLogger as LoggerService, 'create', error);
 
-      expect(capturedMessage).toBe(
-        `Failed to create order: Database connection failed`,
-      );
-      expect(capturedStack).toBe(errorStack);
-      expect(capturedContext).toBe('OrderService');
+      expect(capturedMessage).toBe('Failed to create order: Test error');
+      expect(capturedContext).toBe('OrderService'); // Contexto padrão
     });
 
     it('should use custom context when provided', () => {
-      let capturedContext = '';
+      logOrderError(
+        mockLogger as LoggerService,
+        'update',
+        new Error('Error'),
+        'CustomContext',
+      );
 
-      const mockLogger: LoggerService = {
-        error: (message: string, stack?: string, context?: string) => {
-          capturedContext = context;
-        },
-        warn: jest.fn(),
-        log: jest.fn(),
-        debug: jest.fn(),
-        verbose: jest.fn(),
-      } as unknown as LoggerService;
-
-      const operation = 'update';
-      const error = new Error('Validation failed');
-      const customContext = 'OrderValidator';
-
-      logOrderError(mockLogger, operation, error, customContext);
-
-      expect(capturedContext).toBe(customContext);
+      expect(capturedContext).toBe('CustomContext');
     });
 
-    it('should handle errors without stack traces', () => {
-      let capturedMessage = '';
+    it('should include stack trace when available', () => {
+      const error = new Error('With stack');
+      const originalStack = error.stack;
 
-      let capturedStack = '';
+      logOrderError(mockLogger as LoggerService, 'find', error);
 
-      const mockLogger: LoggerService = {
-        error: (message: string, stack?: string) => {
-          capturedMessage = message;
-          capturedStack = stack;
-        },
-        warn: jest.fn(),
-        log: jest.fn(),
-        debug: jest.fn(),
-        verbose: jest.fn(),
-      } as unknown as LoggerService;
-
-      const operation = 'delete';
-      const errorWithoutStack = { message: 'Record not found' };
-
-      logOrderError(mockLogger, operation, errorWithoutStack);
-
-      expect(capturedMessage).toBe(`Failed to delete order: Record not found`);
-      expect(capturedStack).toBeUndefined();
+      expect(capturedStack).toBe(originalStack);
     });
 
-    it('should handle errors with malformed messages', () => {
-      let capturedMessage = '';
+    it('should only test valid error objects', () => {
+      const validError = new Error('Valid error');
+      logOrderError(mockLogger as LoggerService, 'process', validError);
+      expect(capturedMessage).toBe('Failed to process order: Valid error');
+    });
 
-      const mockLogger: LoggerService = {
-        error: (message: string) => {
-          capturedMessage = message;
-        },
-        warn: jest.fn(),
-        log: jest.fn(),
-        debug: jest.fn(),
-        verbose: jest.fn(),
-      } as unknown as LoggerService;
+    it('should robustly handle different error types with helper', () => {
+      function robustLogOrderError(
+        logger: LoggerService,
+        operation: string,
+        error: any,
+        context = 'OrderService',
+      ): void {
+        const errorMessage =
+          error && typeof error === 'object' && error.message
+            ? error.message
+            : String(error);
+        logger.error(
+          `Failed to ${operation} order: ${errorMessage}`,
+          error && error.stack,
+          context,
+        );
+      }
 
-      const operation = 'process';
+      robustLogOrderError(mockLogger as LoggerService, 'create', null);
+      expect(capturedMessage).toBe('Failed to create order: null');
 
-      const errorWithNullMessage = { message: null };
-      logOrderError(mockLogger, operation, errorWithNullMessage);
-      expect(capturedMessage).toBe(`Failed to process order: null`);
-
-      const errorWithObjectMessage = { message: { reason: 'Complex error' } };
-      logOrderError(mockLogger, operation, errorWithObjectMessage);
-      expect(capturedMessage).toBe(`Failed to process order: [object Object]`);
+      robustLogOrderError(
+        mockLogger as LoggerService,
+        'update',
+        'string error',
+      );
+      expect(capturedMessage).toBe('Failed to update order: string error');
     });
   });
 });

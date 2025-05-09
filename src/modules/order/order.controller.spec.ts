@@ -1,33 +1,83 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { BadRequestException } from '@nestjs/common';
 import { OrderController } from './order.controller';
 import { OrderService } from './order.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
-import {
-  createSampleOrder,
-  cloneSampleOrderWithNewUuid,
-} from './test/controller-test.providers';
-import { NotFoundException, BadRequestException } from '@nestjs/common';
-import { Order } from './entities/order.entity';
-import { OrderStatus } from './entities/order.entity';
 import { PaginationDto } from '../../common/dto/pagination.dto';
+import { OrderStatus } from './entities/order.entity';
+import {
+  OrderNotFoundException,
+  OrderNotModifiableException,
+} from './exceptions/postgres-exceptions';
+import { ElasticsearchNotFoundException } from '../../common/exceptions/elasticsearch-exceptions';
+import { mockOrder, mockOrders } from '../../test/mocks/order.mock';
 import { PaginatedResult } from '../../common/interfaces/paginated-result.interface';
+import { OrderResponseDto } from './dto/order-response.dto';
 
 describe('OrderController', () => {
   let controller: OrderController;
-  let orderService: any;
-  let sampleOrder: Order;
+  let service: OrderService;
+
+  const sampleOrder = { ...mockOrder };
+  const ordersList: OrderResponseDto[] = mockOrders.map((order) => ({
+    ...order,
+    items: order.items.map((item) => ({
+      ...item,
+      uuid: 'mock-uuid',
+      subtotal: item.quantity * item.price,
+    })),
+    createdAt: new Date(order.createdAt),
+    updatedAt: new Date(order.updatedAt),
+  }));
+
+  const createOrderDto: CreateOrderDto = {
+    customerId: sampleOrder.customerId,
+    items: sampleOrder.items.map((item) => ({
+      productId: item.productId,
+      productName: item.productName,
+      quantity: item.quantity,
+      price: item.price,
+    })),
+  };
+
+  const updateOrderDto: UpdateOrderDto = {
+    status: OrderStatus.PROCESSING,
+  };
+
+  const paginatedResult: PaginatedResult<OrderResponseDto> = {
+    data: ordersList,
+    total: ordersList.length,
+    page: 1,
+    limit: 10,
+    pages: 1,
+  };
+
+  const emptyPaginatedResult: PaginatedResult<OrderResponseDto> = {
+    data: [],
+    total: 0,
+    page: 1,
+    limit: 10,
+    pages: 0,
+  };
 
   beforeEach(async () => {
-    sampleOrder = createSampleOrder();
-
-    orderService = {
-      create: jest.fn(),
-      findAll: jest.fn(),
-      findOneByUuid: jest.fn(),
-      update: jest.fn(),
-      cancel: jest.fn(),
-      findByCustomer: jest.fn(),
+    const serviceStub = {
+      create: jest.fn().mockResolvedValue(sampleOrder),
+      findAll: jest.fn().mockResolvedValue(paginatedResult),
+      findOneByUuid: jest.fn().mockResolvedValue(sampleOrder),
+      update: jest.fn().mockImplementation((uuid, dto) => {
+        return Promise.resolve({
+          ...sampleOrder,
+          status: dto.status || sampleOrder.status,
+          updatedAt: new Date().toISOString(),
+        });
+      }),
+      cancel: jest.fn().mockResolvedValue({
+        ...sampleOrder,
+        status: OrderStatus.CANCELED,
+      }),
+      findByCustomer: jest.fn().mockResolvedValue(paginatedResult),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -35,215 +85,214 @@ describe('OrderController', () => {
       providers: [
         {
           provide: OrderService,
-          useValue: orderService,
+          useValue: serviceStub,
         },
       ],
     }).compile();
 
     controller = module.get<OrderController>(OrderController);
+    service = module.get<OrderService>(OrderService);
+  });
+
+  it('should be defined', () => {
+    expect(controller).toBeDefined();
   });
 
   describe('create', () => {
-    it('should create a new order successfully', async () => {
-      const createOrderDto: CreateOrderDto = {
-        customerId: 'customer-123',
-        items: [
-          {
-            productId: 'product-1',
-            productName: 'Sample Product',
-            quantity: 2,
-            price: 1000,
-          },
-        ],
-      };
-      orderService.create.mockResolvedValue(sampleOrder);
-
+    it('should create a new order and return it', async () => {
       const result = await controller.create(createOrderDto);
 
-      expect(result).toEqual(sampleOrder);
+      expect(result).toBeDefined();
+      expect(result.uuid).toBe(sampleOrder.uuid);
+      expect(result.customerId).toBe(sampleOrder.customerId);
+      expect(result.status).toBe(sampleOrder.status);
+      expect(result.total).toBe(sampleOrder.total);
     });
 
-    it('should pass through BadRequestException when service fails', async () => {
-      const createOrderDto: CreateOrderDto = {
-        customerId: 'customer-123',
-        items: [],
-      };
-      orderService.create.mockRejectedValue(
-        new BadRequestException('Invalid order'),
-      );
+    it('should throw BadRequestException when creation fails', async () => {
+      jest
+        .spyOn(service, 'create')
+        .mockRejectedValue(new BadRequestException('Failed to create order'));
 
       await expect(controller.create(createOrderDto)).rejects.toThrow(
         BadRequestException,
+      );
+      await expect(controller.create(createOrderDto)).rejects.toThrow(
+        'Failed to create order',
       );
     });
   });
 
   describe('findAll', () => {
-    it('should return paginated orders', async () => {
-      const secondOrder = cloneSampleOrderWithNewUuid(sampleOrder);
-      secondOrder.uuid = 'order-2';
-
-      const paginatedOrders: PaginatedResult<Order> = {
-        data: [sampleOrder, secondOrder],
-        total: 2,
-        page: 1,
-        limit: 10,
-        pages: 1,
-      };
-
-      orderService.findAll.mockResolvedValue(paginatedOrders);
-      const paginationDto: PaginationDto = { page: 1, limit: 10 };
+    it('should return all orders with pagination', async () => {
+      const paginationDto = new PaginationDto();
+      paginationDto.page = 1;
+      paginationDto.limit = 10;
 
       const result = await controller.findAll(paginationDto);
 
-      expect(result).toEqual(paginatedOrders);
-      expect(result.data.length).toBe(2);
+      expect(result.data).toHaveLength(ordersList.length);
+      expect(result.total).toBe(ordersList.length);
       expect(result.page).toBe(1);
-      expect(result.total).toBe(2);
+      expect(result.limit).toBe(10);
     });
 
-    it('should use default pagination when not provided', async () => {
-      const paginatedOrders: PaginatedResult<Order> = {
-        data: [sampleOrder],
-        total: 1,
-        page: 1,
-        limit: 10,
-        pages: 1,
-      };
+    it('should return empty result when no orders exist', async () => {
+      jest.spyOn(service, 'findAll').mockResolvedValue(emptyPaginatedResult);
 
-      orderService.findAll.mockResolvedValue(paginatedOrders);
+      const result = await controller.findAll(new PaginationDto());
 
-      const result = await controller.findAll({});
-
-      expect(orderService.findAll).toHaveBeenCalled();
-      expect(result.data.length).toBe(1);
+      expect(result.data).toHaveLength(0);
+      expect(result.total).toBe(0);
     });
   });
 
   describe('findOne', () => {
-    it('should return an order by UUID', async () => {
-      const uuid = 'test-uuid';
-      orderService.findOneByUuid.mockResolvedValue(sampleOrder);
+    it('should return a specific order by UUID', async () => {
+      const result = await controller.findOne(sampleOrder.uuid);
 
-      const result = await controller.findOne(uuid);
-
-      expect(result).toEqual(sampleOrder);
+      expect(result.uuid).toBe(sampleOrder.uuid);
+      expect(result.customerId).toBe(sampleOrder.customerId);
+      expect(result.status).toBe(sampleOrder.status);
     });
 
-    it('should pass through NotFoundException when service fails', async () => {
-      const uuid = 'nonexistent-uuid';
-      orderService.findOneByUuid.mockRejectedValue(
-        new NotFoundException('Order not found'),
-      );
+    it('should throw OrderNotFoundException when order does not exist', async () => {
+      const nonExistentUuid = '00000000-0000-0000-0000-000000000000';
+      jest
+        .spyOn(service, 'findOneByUuid')
+        .mockRejectedValue(new OrderNotFoundException(nonExistentUuid));
 
-      await expect(controller.findOne(uuid)).rejects.toThrow(NotFoundException);
+      await expect(controller.findOne(nonExistentUuid)).rejects.toThrow(
+        OrderNotFoundException,
+      );
+      await expect(controller.findOne(nonExistentUuid)).rejects.toThrow(
+        `Order with UUID ${nonExistentUuid} not found`,
+      );
     });
   });
 
   describe('update', () => {
-    it('should update an order successfully', async () => {
-      const uuid = 'test-uuid';
-      const updateOrderDto: UpdateOrderDto = {
-        status: OrderStatus.PROCESSING,
-      };
+    it('should update order status successfully', async () => {
+      const result = await controller.update(sampleOrder.uuid, updateOrderDto);
 
-      const updatedOrder = cloneSampleOrderWithNewUuid(sampleOrder);
-      updatedOrder.status = OrderStatus.PROCESSING;
-
-      orderService.update.mockResolvedValue(updatedOrder);
-
-      const result = await controller.update(uuid, updateOrderDto);
-
-      expect(result).toEqual(updatedOrder);
+      expect(result.uuid).toBe(sampleOrder.uuid);
       expect(result.status).toBe(OrderStatus.PROCESSING);
     });
 
-    it('should pass through BadRequestException when update fails', async () => {
-      const uuid = 'test-uuid';
-      const updateOrderDto: UpdateOrderDto = {
-        status: OrderStatus.PROCESSING,
-      };
-      orderService.update.mockRejectedValue(
-        new BadRequestException('Cannot update'),
-      );
+    it('should throw OrderNotFoundException when updating non-existent order', async () => {
+      const nonExistentUuid = '00000000-0000-0000-0000-000000000000';
+      jest
+        .spyOn(service, 'update')
+        .mockRejectedValue(new OrderNotFoundException(nonExistentUuid));
 
-      await expect(controller.update(uuid, updateOrderDto)).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(
+        controller.update(nonExistentUuid, updateOrderDto),
+      ).rejects.toThrow(OrderNotFoundException);
+    });
+
+    it('should throw OrderNotModifiableException when order cannot be modified', async () => {
+      const status = OrderStatus.DELIVERED;
+      jest
+        .spyOn(service, 'update')
+        .mockRejectedValue(new OrderNotModifiableException(status));
+
+      await expect(
+        controller.update(sampleOrder.uuid, updateOrderDto),
+      ).rejects.toThrow(OrderNotModifiableException);
+      await expect(
+        controller.update(sampleOrder.uuid, updateOrderDto),
+      ).rejects.toThrow(`Order with status ${status} cannot be modified`);
     });
   });
 
   describe('cancel', () => {
     it('should cancel an order successfully', async () => {
-      const uuid = 'test-uuid';
+      const result = await controller.cancel(sampleOrder.uuid);
 
-      const canceledOrder = cloneSampleOrderWithNewUuid(sampleOrder);
-      canceledOrder.status = OrderStatus.CANCELED;
-
-      orderService.cancel.mockResolvedValue(canceledOrder);
-
-      const result = await controller.cancel(uuid);
-
-      expect(result).toEqual(canceledOrder);
+      expect(result.uuid).toBe(sampleOrder.uuid);
       expect(result.status).toBe(OrderStatus.CANCELED);
     });
 
-    it('should pass through BadRequestException when cancel fails', async () => {
-      const uuid = 'test-uuid';
-      orderService.cancel.mockRejectedValue(
-        new BadRequestException('Cannot cancel'),
-      );
+    it('should throw OrderNotFoundException when canceling non-existent order', async () => {
+      const nonExistentUuid = '00000000-0000-0000-0000-000000000000';
+      jest
+        .spyOn(service, 'cancel')
+        .mockRejectedValue(new OrderNotFoundException(nonExistentUuid));
 
-      await expect(controller.cancel(uuid)).rejects.toThrow(
-        BadRequestException,
+      await expect(controller.cancel(nonExistentUuid)).rejects.toThrow(
+        OrderNotFoundException,
+      );
+    });
+
+    it('should throw OrderNotModifiableException when order cannot be canceled', async () => {
+      const status = OrderStatus.DELIVERED;
+      jest
+        .spyOn(service, 'cancel')
+        .mockRejectedValue(new OrderNotModifiableException(status));
+
+      await expect(controller.cancel(sampleOrder.uuid)).rejects.toThrow(
+        OrderNotModifiableException,
       );
     });
   });
 
   describe('findByCustomer', () => {
-    it('should return paginated orders by customer ID', async () => {
-      const customerId = 'customer-123';
-      const paginationDto = new PaginationDto();
+    it('should return orders for a specific customer', async () => {
+      const customerId = sampleOrder.customerId;
+      const result = await controller.findByCustomer(
+        customerId,
+        new PaginationDto(),
+      );
 
-      const secondOrder = cloneSampleOrderWithNewUuid(sampleOrder);
-      secondOrder.uuid = 'order-2';
-
-      const paginatedResult: PaginatedResult<Order> = {
-        data: [sampleOrder, secondOrder],
-        total: 2,
-        page: 1,
-        limit: 10,
-        pages: 1,
-      };
-
-      orderService.findByCustomer.mockResolvedValue(paginatedResult);
-
-      const result = await controller.findByCustomer(customerId, paginationDto);
-
-      expect(result).toEqual(paginatedResult);
-      expect(result.data.length).toBe(2);
+      expect(result.data).toHaveLength(ordersList.length);
+      expect(result.total).toBe(ordersList.length);
       expect(result.data[0].customerId).toBe(customerId);
     });
 
-    it('should return empty data when customer has no orders', async () => {
+    it('should return empty array when customer has no orders', async () => {
       const customerId = 'customer-no-orders';
-      const paginationDto = new PaginationDto();
+      jest
+        .spyOn(service, 'findByCustomer')
+        .mockResolvedValue(emptyPaginatedResult);
 
-      const emptyResult: PaginatedResult<Order> = {
-        data: [],
-        total: 0,
-        page: 1,
-        limit: 10,
-        pages: 0,
-      };
+      const result = await controller.findByCustomer(
+        customerId,
+        new PaginationDto(),
+      );
 
-      orderService.findByCustomer.mockResolvedValue(emptyResult);
-
-      const result = await controller.findByCustomer(customerId, paginationDto);
-
-      expect(result).toEqual(emptyResult);
-      expect(result.data.length).toBe(0);
+      expect(result.data).toHaveLength(0);
       expect(result.total).toBe(0);
+    });
+
+    it('should throw OrderNotFoundException when customer orders search fails', async () => {
+      const customerId = 'non-existent-customer';
+      jest
+        .spyOn(service, 'findByCustomer')
+        .mockRejectedValue(
+          new OrderNotFoundException(`customer: ${customerId}`),
+        );
+
+      await expect(
+        controller.findByCustomer(customerId, new PaginationDto()),
+      ).rejects.toThrow(OrderNotFoundException);
+    });
+
+    it('should throw ElasticsearchNotFoundException when search engine fails', async () => {
+      const customerId = 'customer-search-error';
+      jest
+        .spyOn(service, 'findByCustomer')
+        .mockRejectedValue(
+          new ElasticsearchNotFoundException(
+            `No orders found for customer ID: ${customerId}`,
+          ),
+        );
+
+      await expect(
+        controller.findByCustomer(customerId, new PaginationDto()),
+      ).rejects.toThrow(ElasticsearchNotFoundException);
+      await expect(
+        controller.findByCustomer(customerId, new PaginationDto()),
+      ).rejects.toThrow(`No orders found for customer ID: ${customerId}`);
     });
   });
 });

@@ -1,269 +1,355 @@
+import { Logger } from '@nestjs/common';
+import { Order, OrderStatus } from '../entities/order.entity';
+import { OrderItem } from '../entities/order-item.entity';
+import { PaginationDto } from '../../../common/dto/pagination.dto';
 import {
-  mapElasticsearchResponseToOrders,
   prepareOrderDocument,
-  formatElasticsearchErrorMessage,
-  mapResponseToOrderEntity,
+  extractMostRecentOrderState,
+  mapElasticsearchResponseToOrders,
+  getTotalCount,
+  executeKeywordSearch,
+  executeManualFiltering,
 } from './elasticsearch.helpers';
-import { OrderStatus } from '../entities/order.entity';
 import { createSampleOrder } from '../test/test.providers';
-import { Order } from '../entities/order.entity';
-import { OrderDocument } from '../interfaces/order-document.interface';
-import { createSampleElasticsearchResponse } from '../test/elasticsearch-test.providers';
 
 describe('Elasticsearch Helpers', () => {
-  describe('mapElasticsearchResponseToOrders', () => {
-    it('should correctly map Elasticsearch response to Order array', () => {
-      const esResponse = createSampleElasticsearchResponse();
+  beforeAll(() => {
+    jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => {});
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
+    jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
+  });
 
-      const orders = mapElasticsearchResponseToOrders(esResponse);
+  afterAll(() => {
+    jest.restoreAllMocks();
+  });
 
-      expect(orders).toBeInstanceOf(Array);
-      expect(orders.length).toBe(2);
-      expect(orders[0]).toBeInstanceOf(Order);
-      expect(orders[0].uuid).toBe('order-1');
-      expect(orders[0].customerId).toBe('customer-123');
-      expect(orders[0].status).toBe(OrderStatus.PENDING);
-      expect(orders[0].total).toBe(3000);
-      expect(orders[0].items.length).toBe(2);
-      expect(orders[0].items[0].productId).toBe('product-1');
-      expect(orders[0].items[0].price).toBe(1000);
-      expect(orders[0].items[0].quantity).toBe(2);
+  describe('prepareOrderDocument', () => {
+    it('should prepare a document for indexing in Elasticsearch', () => {
+      const order = createSampleOrder();
+
+      const document = prepareOrderDocument(order);
+
+      expect(document.uuid).toBe(order.uuid);
+      expect(document.customerId).toBe(order.customerId);
+      expect(document.status).toBe(order.status);
+      expect(document.total).toBe(order.total);
+
+      expect(document.items.length).toEqual(order.items.length);
+      expect(document.items[0].productId).toEqual(order.items[0].productId);
+
+      expect(document.items[0].order).toBeUndefined();
     });
 
-    it('should handle items when not present in the source', () => {
-      const esResponse = {
+    it('should handle undefined items', () => {
+      const order = createSampleOrder();
+      order.items = undefined;
+
+      const document = prepareOrderDocument(order);
+
+      expect(document.items).toEqual([]);
+    });
+  });
+
+  describe('extractMostRecentOrderState', () => {
+    it('should extract an Order from an Elasticsearch document', () => {
+      const hitSource = {
+        uuid: 'test-uuid',
+        customerId: 'customer-123',
+        status: OrderStatus.PENDING,
+        total: 1000,
+        createdAt: '2023-01-01T12:00:00Z',
+        updatedAt: '2023-01-02T12:00:00Z',
+        items: [
+          {
+            id: 1,
+            productId: 'product-1',
+            productName: 'Product One',
+            quantity: 2,
+            price: 300,
+          },
+        ],
+      };
+
+      const order = extractMostRecentOrderState(hitSource);
+
+      expect(order).toBeInstanceOf(Order);
+      expect(order.uuid).toBe('test-uuid');
+      expect(order.customerId).toBe('customer-123');
+      expect(order.status).toBe(OrderStatus.PENDING);
+      expect(order.items.length).toBe(1);
+      expect(order.items[0]).toBeInstanceOf(OrderItem);
+
+      expect(order.items[0].order).toBe(order);
+    });
+
+    it('should accept partial data without default values', () => {
+      const partialSource = {
+        uuid: 'test-uuid',
+      };
+
+      const order = extractMostRecentOrderState(partialSource);
+
+      expect(order).toBeInstanceOf(Order);
+      expect(order.uuid).toBe('test-uuid');
+      expect(order.customerId).toBeUndefined();
+      expect(order.status).toBeUndefined();
+      expect(order.items).toBeUndefined();
+    });
+
+    it('should throw error for completely invalid data', () => {
+      const completelyInvalidSource = null;
+
+      expect(() =>
+        extractMostRecentOrderState(completelyInvalidSource),
+      ).toThrow();
+    });
+  });
+
+  describe('mapElasticsearchResponseToOrders', () => {
+    it('should map Elasticsearch response to array of Orders', () => {
+      const response = {
         hits: {
+          total: { value: 2 },
           hits: [
             {
-              _id: '1',
               _source: {
-                uuid: 'order-no-items',
-                customerId: 'customer-456',
+                uuid: 'order-1',
+                customerId: 'customer-1',
                 status: OrderStatus.PENDING,
-                total: 0,
-                createdAt: '2023-03-01T00:00:00.000Z',
-                updatedAt: '2023-03-01T00:00:00.000Z',
+                total: 500,
+                createdAt: '2023-01-01T10:00:00Z',
+                updatedAt: '2023-01-01T10:00:00Z',
+                items: [],
+              },
+            },
+            {
+              _source: {
+                uuid: 'order-2',
+                customerId: 'customer-2',
+                status: OrderStatus.DELIVERED,
+                total: 1200,
+                createdAt: '2023-01-02T10:00:00Z',
+                updatedAt: '2023-01-02T10:00:00Z',
+                items: [],
               },
             },
           ],
         },
       };
 
-      const orders = mapElasticsearchResponseToOrders(esResponse);
+      const orders = mapElasticsearchResponseToOrders(response);
 
-      expect(orders).toBeInstanceOf(Array);
-      expect(orders.length).toBe(1);
-      expect(orders[0].items).toBeInstanceOf(Array);
-      expect(orders[0].items.length).toBe(0);
+      expect(orders.length).toBe(2);
+      expect(orders[0]).toBeInstanceOf(Order);
+      expect(orders[0].uuid).toBe('order-1');
+      expect(orders[1].uuid).toBe('order-2');
     });
 
-    it('should handle empty response', () => {
-      const esResponse = { hits: { hits: [] } };
-
-      const orders = mapElasticsearchResponseToOrders(esResponse);
-
-      expect(orders).toBeInstanceOf(Array);
-      expect(orders.length).toBe(0);
-    });
-  });
-
-  describe('prepareOrderDocument', () => {
-    it('should correctly format Order for Elasticsearch indexing', () => {
-      const order = createSampleOrder();
-      const createdAt = new Date('2023-01-01T00:00:00.000Z');
-      const updatedAt = new Date('2023-01-02T00:00:00.000Z');
-      order.createdAt = createdAt;
-      order.updatedAt = updatedAt;
-
-      const document = prepareOrderDocument(order);
-
-      expect(document).toBeDefined();
-      expect(document.uuid).toBe(order.uuid);
-      expect(document.customerId).toBe(order.customerId);
-      expect(document.status).toBe(order.status);
-      expect(document.total).toBe(order.total);
-
-      const documentCreatedDate =
-        typeof document.createdAt === 'string'
-          ? new Date(document.createdAt)
-          : document.createdAt;
-
-      const documentUpdatedDate =
-        typeof document.updatedAt === 'string'
-          ? new Date(document.updatedAt)
-          : document.updatedAt;
-
-      expect(documentCreatedDate.getTime()).toBe(createdAt.getTime());
-      expect(documentUpdatedDate.getTime()).toBe(updatedAt.getTime());
-
-      expect(document.items).toBeInstanceOf(Array);
-      expect(document.items.length).toBe(order.items.length);
-      expect(document.items[0].uuid).toBe(order.items[0].uuid);
-      expect(document.items[0].productId).toBe(order.items[0].productId);
-      expect(document.items[0].price).toBe(order.items[0].price);
-    });
-
-    it('should handle empty items array', () => {
-      const order = createSampleOrder();
-      order.items = [];
-
-      const document = prepareOrderDocument(order);
-
-      expect(document).toBeDefined();
-      expect(document.items).toBeInstanceOf(Array);
-      expect(document.items.length).toBe(0);
-    });
-  });
-
-  describe('formatElasticsearchErrorMessage', () => {
-    it('should format error message with operation and error details', () => {
-      const operation = 'index document';
-      const error = new Error('Connection refused');
-
-      const message = formatElasticsearchErrorMessage(operation, error);
-
-      expect(message).toBe(
-        'Failed to index document in Elasticsearch: Connection refused',
+    it('should return empty array for invalid responses', () => {
+      expect(mapElasticsearchResponseToOrders({})).toEqual([]);
+      expect(mapElasticsearchResponseToOrders(null)).toEqual([]);
+      expect(mapElasticsearchResponseToOrders({ hits: { hits: [] } })).toEqual(
+        [],
       );
     });
+  });
 
-    it('should handle error without message property', () => {
-      const operation = 'search';
-      const error = {};
-      const message = formatElasticsearchErrorMessage(operation, error);
+  describe('getTotalCount', () => {
+    it('should extract total count correctly', () => {
+      expect(getTotalCount(42)).toBe(42);
 
-      expect(message).toBe('Failed to search in Elasticsearch: undefined');
+      expect(getTotalCount({ value: 100, relation: 'eq' })).toBe(100);
     });
   });
 
-  describe('mapResponseToOrderEntity', () => {
-    it('should map OrderDocument to Order entity with all fields', () => {
-      const dateStr = '2023-04-15T10:30:00.000Z';
-      const createdAtDate = new Date(dateStr);
-      const updatedAtDate = new Date('2023-04-15T11:45:00.000Z');
+  describe('executeKeywordSearch', () => {
+    it('should search orders by customer ID and return paginated results', async () => {
+      const mockResponse = {
+        hits: {
+          total: { value: 2 },
+          hits: [
+            {
+              _source: {
+                uuid: 'order-1',
+                customerId: 'customer-123',
+                status: OrderStatus.PENDING,
+                items: [],
+              },
+            },
+            {
+              _source: {
+                uuid: 'order-2',
+                customerId: 'customer-123',
+                status: OrderStatus.DELIVERED,
+                items: [],
+              },
+            },
+          ],
+        },
+      };
 
-      const source: OrderDocument = {
-        uuid: 'order-123',
-        id: 42,
-        customerId: 'customer-456',
-        status: OrderStatus.PENDING,
-        total: 5000,
-        createdAt: createdAtDate,
-        updatedAt: updatedAtDate,
-        items: [
-          {
-            uuid: 'item-1',
-            id: 101,
-            productId: 'product-abc',
-            productName: 'Test Product',
-            price: 2500,
-            quantity: 2,
-            subtotal: 5000,
+      const elasticsearchService = {
+        search: jest.fn().mockResolvedValue(mockResponse),
+      };
+
+      const result = await executeKeywordSearch(
+        elasticsearchService as any,
+        'orders',
+        'customer-123',
+        new PaginationDto(),
+        new Logger(),
+      );
+
+      expect(result.data.length).toBe(2);
+      expect(result.total).toBe(2);
+      expect(result.data[0].uuid).toBe('order-1');
+      expect(result.data[1].uuid).toBe('order-2');
+    });
+
+    it('should return empty results when error occurs', async () => {
+      const elasticsearchService = {
+        search: jest.fn().mockRejectedValue(new Error('Connection error')),
+      };
+
+      const result = await executeKeywordSearch(
+        elasticsearchService as any,
+        'orders',
+        'customer-123',
+        new PaginationDto(),
+        new Logger(),
+      );
+
+      expect(result.data).toEqual([]);
+      expect(result.total).toBe(0);
+    });
+  });
+
+  describe('executeManualFiltering', () => {
+    it('should filter orders by customer ID', async () => {
+      const mockResponse = {
+        hits: {
+          total: { value: 3 },
+          hits: [
+            {
+              _source: {
+                uuid: 'order-1',
+                customerId: 'customer-123',
+                items: [],
+              },
+            },
+            {
+              _source: {
+                uuid: 'order-2',
+                customerId: 'customer-456',
+                items: [],
+              },
+            },
+            {
+              _source: {
+                uuid: 'order-3',
+                customerId: 'customer-123',
+                items: [],
+              },
+            },
+          ],
+        },
+      };
+
+      const elasticsearchService = {
+        search: jest.fn().mockResolvedValue(mockResponse),
+      };
+
+      const result = await executeManualFiltering(
+        elasticsearchService as any,
+        'orders',
+        'customer-123',
+        new PaginationDto(),
+        new Logger(),
+      );
+
+      expect(result.data.length).toBe(2);
+      expect(result.total).toBe(2);
+      expect(result.data[0].customerId).toBe('customer-123');
+      expect(result.data[1].customerId).toBe('customer-123');
+    });
+
+    it('should apply pagination correctly', async () => {
+      const mockHits = [];
+      for (let i = 1; i <= 15; i++) {
+        mockHits.push({
+          _source: {
+            uuid: `order-${i}`,
+            customerId: 'customer-123',
+            items: [],
           },
-        ],
+        });
+      }
+
+      const elasticsearchService = {
+        search: jest.fn().mockResolvedValue({
+          hits: {
+            total: { value: mockHits.length },
+            hits: mockHits,
+          },
+        }),
       };
 
-      const result = mapResponseToOrderEntity(source);
+      const paginationDto = new PaginationDto();
+      paginationDto.page = 2;
+      paginationDto.limit = 5;
 
-      expect(result).toBeInstanceOf(Order);
-      expect(result.uuid).toBe('order-123');
-      expect(result.id).toBe(42);
-      expect(result.customerId).toBe('customer-456');
-      expect(result.status).toBe(OrderStatus.PENDING);
-      expect(result.total).toBe(5000);
-      expect(result.createdAt).toBeInstanceOf(Date);
-      expect(result.createdAt.toISOString()).toBe(dateStr);
-      expect(result.updatedAt).toBeInstanceOf(Date);
-      expect(result.updatedAt.toISOString()).toBe('2023-04-15T11:45:00.000Z');
-      expect(result.items.length).toBe(1);
-      expect(result.items[0].uuid).toBe('item-1');
-      expect(result.items[0].id).toBe(101);
-      expect(result.items[0].productId).toBe('product-abc');
-      expect(result.items[0].productName).toBe('Test Product');
-      expect(result.items[0].price).toBe(2500);
-      expect(result.items[0].quantity).toBe(2);
-      expect(result.items[0].subtotal).toBe(5000);
+      const result = await executeManualFiltering(
+        elasticsearchService as any,
+        'orders',
+        'customer-123',
+        paginationDto,
+        new Logger(),
+      );
+
+      expect(result.data.length).toBe(5);
+      expect(result.total).toBe(15);
+      expect(result.page).toBe(2);
+      expect(result.pages).toBe(3);
+      expect(result.data[0].uuid).toBe('order-6');
     });
 
-    it('should handle null source by returning null', () => {
-      const result = mapResponseToOrderEntity(null);
-      expect(result).toBeNull();
-    });
-
-    it('should handle undefined dates', () => {
-      const source: OrderDocument = {
-        uuid: 'order-123',
-        customerId: 'customer-456',
-        status: OrderStatus.PENDING,
-        total: 1000,
-        items: [],
-      } as OrderDocument;
-
-      const result = mapResponseToOrderEntity(source);
-
-      expect(result).toBeInstanceOf(Order);
-      expect(result.uuid).toBe('order-123');
-      expect(result.createdAt).toBeUndefined();
-      expect(result.updatedAt).toBeUndefined();
-    });
-
-    it('should handle empty items array', () => {
-      const source: OrderDocument = {
-        uuid: 'order-empty-items',
-        customerId: 'customer-789',
-        status: OrderStatus.DELIVERED,
-        total: 0,
-        createdAt: new Date('2023-05-20T14:00:00.000Z'),
-        updatedAt: new Date('2023-05-20T14:00:00.000Z'),
-        items: [],
+    it('should return empty results when no orders found for the customer', async () => {
+      const mockResponse = {
+        hits: {
+          total: { value: 2 },
+          hits: [
+            {
+              _source: {
+                uuid: 'order-1',
+                customerId: 'customer-456',
+                items: [],
+              },
+            },
+            {
+              _source: {
+                uuid: 'order-2',
+                customerId: 'customer-456',
+                items: [],
+              },
+            },
+          ],
+        },
       };
 
-      const result = mapResponseToOrderEntity(source);
-
-      expect(result).toBeInstanceOf(Order);
-      expect(result.items).toBeInstanceOf(Array);
-      expect(result.items.length).toBe(0);
-    });
-
-    it('should handle missing items field', () => {
-      const source: OrderDocument = {
-        uuid: 'order-no-items',
-        customerId: 'customer-321',
-        status: OrderStatus.CANCELED,
-        total: 0,
-        createdAt: new Date('2023-06-10T09:15:00.000Z'),
-        updatedAt: new Date('2023-06-10T09:15:00.000Z'),
-        items: [],
+      const elasticsearchService = {
+        search: jest.fn().mockResolvedValue(mockResponse),
       };
 
-      const sourceWithoutItems = { ...source };
-      delete (sourceWithoutItems as any).items;
+      const result = await executeManualFiltering(
+        elasticsearchService as any,
+        'orders',
+        'customer-123',
+        new PaginationDto(),
+        new Logger(),
+      );
 
-      const result = mapResponseToOrderEntity(sourceWithoutItems as any);
-
-      expect(result).toBeInstanceOf(Order);
-      expect(result.items).toBeInstanceOf(Array);
-      expect(result.items.length).toBe(0);
-    });
-
-    it('should convert date strings to Date objects', () => {
-      const dateStr = '2023-07-01T12:00:00.000Z';
-      const sourceWithStringDates = {
-        uuid: 'order-with-dates',
-        customerId: 'customer-date-test',
-        status: OrderStatus.PENDING,
-        total: 1500,
-        createdAt: dateStr,
-        updatedAt: dateStr,
-        items: [],
-      };
-
-      const result = mapResponseToOrderEntity(sourceWithStringDates as any);
-
-      expect(result.createdAt).toBeInstanceOf(Date);
-      expect(result.createdAt.getTime()).toBe(new Date(dateStr).getTime());
-      expect(result.updatedAt).toBeInstanceOf(Date);
-      expect(result.updatedAt.getTime()).toBe(new Date(dateStr).getTime());
+      expect(result.data).toEqual([]);
+      expect(result.total).toBe(0);
     });
   });
 });

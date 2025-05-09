@@ -10,6 +10,7 @@ import {
   createMockSearchResponse,
   createMockOrder,
 } from '../test/test.helpers';
+import { Logger } from '@nestjs/common';
 
 jest.mock('./elasticsearch.helpers', () => ({
   extractOrdersFromResponse: jest.fn(),
@@ -33,6 +34,9 @@ describe('Search Helpers', () => {
 
     elasticsearchService =
       moduleRef.get<ElasticsearchService>(ElasticsearchService);
+
+    jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
   });
 
   afterEach(() => {

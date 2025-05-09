@@ -32,17 +32,14 @@ export class OrderReconciliationService {
     errorMessage: string = '',
   ): Promise<void> {
     try {
-      // Map the string operation type to enum
       const operationType = this.mapOperationTypeString(operation);
 
-      // Create a new reconciliation record
       const reconciliationRecord = new OrderReconciliation();
       reconciliationRecord.orderUuid = orderUuid;
       reconciliationRecord.operationType = operationType;
       reconciliationRecord.status = ReconciliationStatus.PENDING;
       reconciliationRecord.errorMessage = errorMessage;
 
-      // Save the record to the database
       await this.reconciliationRepository.save(reconciliationRecord);
 
       this.logger.warn(
@@ -77,7 +74,6 @@ export class OrderReconciliationService {
       return ReconciliationOperationType.DELETE;
     }
 
-    // Default to INDEX if operation is not recognized
     this.logger.warn(
       `Unrecognized operation type: ${operation}, defaulting to INDEX`,
       'OrderReconciliationService',

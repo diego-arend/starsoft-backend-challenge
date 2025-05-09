@@ -1,5 +1,6 @@
 import { HttpStatus } from '@nestjs/common';
 import { BaseException } from '../../../common/exceptions/base.exception';
+import { OrderStatus } from '../entities/order.entity';
 
 /**
  * Exception thrown when an order event processing fails
@@ -54,5 +55,34 @@ export class OrderValidationException extends BaseException {
    */
   constructor(message: string, details: any) {
     super(message, HttpStatus.BAD_REQUEST, 'ORDER_VALIDATION_FAILED', details);
+  }
+}
+
+/**
+ * Exception thrown when an order cannot be modified due to its current status
+ */
+export class OrderNotModifiableException extends BaseException {
+  /**
+   * Creates a new OrderNotModifiableException
+   *
+   * @param uuid - UUID of the order that cannot be modified
+   * @param currentStatus - Current status of the order
+   * @param allowedStatuses - Optional array of statuses that would allow modification
+   */
+  constructor(
+    uuid: string,
+    currentStatus: OrderStatus,
+    allowedStatuses?: OrderStatus[],
+  ) {
+    const statusMessage = allowedStatuses
+      ? `Status must be one of: ${allowedStatuses.join(', ')}`
+      : `Status ${currentStatus} does not allow modifications`;
+
+    super(
+      `Order ${uuid} cannot be modified. ${statusMessage}`,
+      HttpStatus.BAD_REQUEST,
+      'ORDER_NOT_MODIFIABLE',
+      { uuid, currentStatus, allowedStatuses },
+    );
   }
 }

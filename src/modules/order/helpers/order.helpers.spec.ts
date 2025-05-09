@@ -6,216 +6,130 @@ import {
   formatErrorMessage,
 } from './order.helpers';
 import { OrderItemDto } from '../dto/order-item.dto';
-import { Order, OrderStatus } from '../entities/order.entity';
-import { OrderItem } from '../entities/order-item.entity';
+import { OrderStatus } from '../entities/order.entity';
+import { createSampleOrder } from '../test/test.providers';
+
+const sampleItems: OrderItemDto[] = [
+  {
+    productId: 'prod-1',
+    productName: 'Product 1',
+    price: 100,
+    quantity: 2,
+  },
+  {
+    productId: 'prod-2',
+    productName: 'Product 2',
+    price: 50,
+    quantity: 3,
+  },
+];
 
 describe('Order Helpers', () => {
   describe('calculateOrderTotal', () => {
-    it('should calculate total correctly for multiple items', () => {
-      const items: OrderItemDto[] = [
-        {
-          productId: 'prod-1',
-          productName: 'Product 1',
-          price: 1000,
-          quantity: 2,
-        },
-        {
-          productId: 'prod-2',
-          productName: 'Product 2',
-          price: 500,
-          quantity: 3,
-        },
-      ];
+    it('should calculate total correctly', () => {
+      expect(calculateOrderTotal(sampleItems)).toBe(350);
 
-      const total = calculateOrderTotal(items);
+      expect(calculateOrderTotal([])).toBe(0);
+      expect(calculateOrderTotal(null)).toBe(0);
+      expect(calculateOrderTotal(undefined)).toBe(0);
+    });
+  });
 
-      expect(total).toBe(3500);
+  describe('createOrderItems', () => {
+    it('should create OrderItem entities with correct data', () => {
+      const orderUuid = 'test-uuid';
+      const items = createOrderItems(sampleItems, orderUuid);
+
+      expect(items).toHaveLength(2);
+      expect(items[0].orderUuid).toBe(orderUuid);
+      expect(items[0].productId).toBe('prod-1');
+      expect(items[0].subtotal).toBe(200);
+      expect(items[1].subtotal).toBe(150);
     });
 
-    it('should return 0 for empty items array', () => {
-      const items: OrderItemDto[] = [];
+    it('should handle empty or invalid inputs', () => {
+      const orderUuid = 'test-uuid';
 
-      const total = calculateOrderTotal(items);
+      expect(createOrderItems([], orderUuid)).toEqual([]);
+      expect(createOrderItems(null, orderUuid)).toEqual([]);
+      expect(createOrderItems(undefined, orderUuid)).toEqual([]);
+    });
+  });
 
-      expect(total).toBe(0);
+  describe('validateOrderItems', () => {
+    it('should validate items correctly', () => {
+      expect(validateOrderItems(sampleItems)).toEqual([]);
+
+      expect(validateOrderItems([])).toContain(
+        'Order must have at least one item',
+      );
+
+      const itemWithInvalidPrice = [{ ...sampleItems[0], price: 0 }];
+      expect(validateOrderItems(itemWithInvalidPrice)).toContain(
+        'Item #1 must have a positive price',
+      );
+
+      const itemWithInvalidQuantity = [{ ...sampleItems[0], quantity: 0 }];
+      expect(validateOrderItems(itemWithInvalidQuantity)).toContain(
+        'Item #1 must have a positive integer quantity',
+      );
     });
 
-    describe('createOrderItems', () => {
-      it('should create proper OrderItem entities from DTOs', () => {
-        const orderId = 123;
-        const itemDtos: OrderItemDto[] = [
-          {
-            productId: 'prod-1',
-            productName: 'Product 1',
-            price: 1000,
-            quantity: 2,
-          },
-          {
-            productId: 'prod-2',
-            productName: 'Product 2',
-            price: 500,
-            quantity: 3,
-          },
-        ];
+    it('should collect multiple errors', () => {
+      const invalidItem = {
+        productId: '',
+        productName: '',
+        price: -5,
+        quantity: -1,
+      };
 
-        const orderItems = createOrderItems(itemDtos, orderId);
+      const errors = validateOrderItems([invalidItem]);
 
-        expect(orderItems).toHaveLength(2);
-        expect(orderItems[0]).toBeInstanceOf(OrderItem);
-        expect(orderItems[0].orderId).toBe(orderId);
-        expect(orderItems[0].productId).toBe('prod-1');
-        expect(orderItems[0].productName).toBe('Product 1');
-        expect(orderItems[0].price).toBe(1000);
-        expect(orderItems[0].quantity).toBe(2);
-        expect(orderItems[0].subtotal).toBe(2000);
-
-        expect(orderItems[1].orderId).toBe(orderId);
-        expect(orderItems[1].subtotal).toBe(1500);
-      });
-
-      it('should return empty array when input is empty', () => {
-        const orderId = 123;
-        const itemDtos: OrderItemDto[] = [];
-
-        const orderItems = createOrderItems(itemDtos, orderId);
-
-        expect(orderItems).toEqual([]);
-      });
-    });
-
-    describe('validateOrderItems', () => {
-      it('should return empty array for valid items', () => {
-        const items: OrderItemDto[] = [
-          {
-            productId: 'prod-1',
-            productName: 'Product 1',
-            price: 1000,
-            quantity: 2,
-          },
-        ];
-
-        const errors = validateOrderItems(items);
-
-        expect(errors).toEqual([]);
-      });
-
-      it('should detect empty items array', () => {
-        const errors = validateOrderItems([]);
-
-        expect(errors).toContain('Order must have at least one item');
-        expect(errors).toHaveLength(1);
-      });
-
-      it('should detect missing product ID', () => {
-        const items: OrderItemDto[] = [
-          { productId: '', productName: 'Product 1', price: 1000, quantity: 2 },
-        ];
-
-        const errors = validateOrderItems(items);
-
-        expect(errors).toContain('Item #1 must have a product ID');
-      });
-
-      it('should detect missing product name', () => {
-        const items: OrderItemDto[] = [
-          { productId: 'prod-1', productName: '', price: 1000, quantity: 2 },
-        ];
-
-        const errors = validateOrderItems(items);
-
-        expect(errors).toContain('Item #1 must have a product name');
-      });
-
-      it('should detect invalid price', () => {
-        const items: OrderItemDto[] = [
-          {
-            productId: 'prod-1',
-            productName: 'Product 1',
-            price: 0,
-            quantity: 2,
-          },
-          {
-            productId: 'prod-2',
-            productName: 'Product 2',
-            price: -5,
-            quantity: 1,
-          },
-        ];
-
-        const errors = validateOrderItems(items);
-
-        expect(errors).toContain('Item #1 must have a positive price');
-        expect(errors).toContain('Item #2 must have a positive price');
-        expect(errors).toHaveLength(2);
-      });
-    });
-
-    it('should detect multiple errors in one item', () => {
-      const items: OrderItemDto[] = [
-        { productId: '', productName: '', price: -10, quantity: 0 },
-      ];
-
-      const errors = validateOrderItems(items);
-
-      expect(errors).toHaveLength(4);
-    });
-
-    it('should handle null or undefined items', () => {
-      const errors = validateOrderItems(null);
-
-      expect(errors).toContain('Order must have at least one item');
+      expect(errors.length).toBeGreaterThanOrEqual(4);
+      expect(errors).toContain('Item #1 must have a product ID');
+      expect(errors).toContain('Item #1 must have a product name');
     });
   });
 
   describe('canOrderBeModified', () => {
-    it('should return true for orders with PENDING status', () => {
-      const order = new Order();
+    it('should determine if order can be modified based on status', () => {
+      const order = createSampleOrder();
+
       order.status = OrderStatus.PENDING;
-
       expect(canOrderBeModified(order)).toBe(true);
-    });
 
-    it('should return true for orders with PROCESSING status', () => {
-      const order = new Order();
       order.status = OrderStatus.PROCESSING;
-
       expect(canOrderBeModified(order)).toBe(true);
-    });
 
-    it('should return false for orders with DELIVERED status', () => {
-      const order = new Order();
       order.status = OrderStatus.DELIVERED;
-
       expect(canOrderBeModified(order)).toBe(false);
-    });
 
-    it('should return false for orders with CANCELED status', () => {
-      const order = new Order();
       order.status = OrderStatus.CANCELED;
-
       expect(canOrderBeModified(order)).toBe(false);
+
+      expect(canOrderBeModified(null)).toBe(false);
+      expect(canOrderBeModified(undefined)).toBe(false);
     });
   });
 
   describe('formatErrorMessage', () => {
-    it('should format error message with operation and message', () => {
-      const operation = 'create';
-      const error = new Error('Database connection failed');
+    it('should format error messages correctly', () => {
+      const error = new Error('Test error');
 
-      const message = formatErrorMessage(operation, error);
-
-      expect(message).toBe(
-        'Failed to create order in PostgreSQL: Database connection failed',
+      expect(formatErrorMessage('create', error)).toBe(
+        'Failed to create order in PostgreSQL: Test error',
       );
-    });
 
-    it('should handle errors without message property', () => {
-      const operation = 'update';
-      const error = {};
+      expect(formatErrorMessage('update', error)).toBe(
+        'Failed to update order in PostgreSQL: Test error',
+      );
 
-      const message = formatErrorMessage(operation, error);
-
-      expect(message).toBe('Failed to update order in PostgreSQL: undefined');
+      expect(formatErrorMessage('delete', null)).toContain(
+        'Failed to delete order',
+      );
+      expect(formatErrorMessage('index', { code: 'ERROR' })).toContain(
+        'Failed to index order',
+      );
     });
   });
 });

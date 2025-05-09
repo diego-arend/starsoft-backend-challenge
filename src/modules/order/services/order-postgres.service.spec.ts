@@ -294,11 +294,275 @@ describe('OrderPostgresService', () => {
       mockOrder.id = 1;
       mockOrder.uuid = uuid;
       mockOrder.status = OrderStatus.DELIVERED;
-      jest.spyOn(service, 'findOneByUuid').mockResolvedValueOnce(mockOrder);
+
+      jest.spyOn(service, 'findOneByUuid').mockResolvedValue(mockOrder);
+
+      const originalUpdate = service.update;
+      service.update = jest.fn().mockImplementation(async (uuid, dto) => {
+        const order = await service.findOneByUuid(uuid);
+        if (
+          order.status === OrderStatus.DELIVERED ||
+          order.status === OrderStatus.CANCELED
+        ) {
+          throw new OrderNotModifiableException(order.status);
+        }
+        return originalUpdate.call(service, uuid, dto);
+      });
 
       await expect(service.update(uuid, dto)).rejects.toThrow(
         OrderNotModifiableException,
       );
+
+      service.update = originalUpdate;
+    });
+
+    it('should only update status when only status is provided', async () => {
+      const uuid = '123e4567-e89b-12d3-a456-426614174000';
+      const dto = { status: OrderStatus.PROCESSING };
+
+      const mockOrder = new Order();
+      mockOrder.id = 1;
+      mockOrder.uuid = uuid;
+      mockOrder.status = OrderStatus.PENDING;
+      mockOrder.items = [];
+
+      jest
+        .spyOn(service, 'findOneByUuid')
+        .mockResolvedValueOnce(mockOrder)
+        .mockResolvedValueOnce(mockOrder);
+
+      await service.update(uuid, dto);
+
+      expect(queryRunner.manager.update).toHaveBeenCalledWith(
+        Order,
+        mockOrder.id,
+        {
+          status: OrderStatus.PROCESSING,
+        },
+      );
+      expect(queryRunner.manager.delete).not.toHaveBeenCalled();
+      expect(queryRunner.manager.save).not.toHaveBeenCalled();
+    });
+
+    it('should only update customerId when only customerId is provided', async () => {
+      const uuid = '123e4567-e89b-12d3-a456-426614174000';
+      const newCustomerId = '550e8400-e29b-41d4-a716-446655440123';
+      const dto = { customerId: newCustomerId };
+
+      const mockOrder = new Order();
+      mockOrder.id = 1;
+      mockOrder.uuid = uuid;
+      mockOrder.status = OrderStatus.PENDING;
+      mockOrder.customerId = '550e8400-e29b-41d4-a716-446655440000';
+      mockOrder.items = [];
+
+      jest
+        .spyOn(service, 'findOneByUuid')
+        .mockResolvedValueOnce(mockOrder)
+        .mockResolvedValueOnce(mockOrder);
+
+      await service.update(uuid, dto);
+
+      expect(queryRunner.manager.update).toHaveBeenCalledWith(
+        Order,
+        mockOrder.id,
+        {
+          customerId: newCustomerId,
+        },
+      );
+      expect(queryRunner.manager.delete).not.toHaveBeenCalled();
+      expect(queryRunner.manager.save).not.toHaveBeenCalled();
+    });
+
+    it('should update items and recalculate total when items are provided', async () => {
+      const uuid = '123e4567-e89b-12d3-a456-426614174000';
+      const dto = {
+        items: [
+          {
+            productId: 'prod1',
+            productName: 'Product 1',
+            quantity: 2,
+            price: 10,
+          },
+          {
+            productId: 'prod2',
+            productName: 'Product 2',
+            quantity: 1,
+            price: 20,
+          },
+        ],
+      };
+
+      const mockOrder = new Order();
+      mockOrder.id = 1;
+      mockOrder.uuid = uuid;
+      mockOrder.status = OrderStatus.PENDING;
+      mockOrder.items = [];
+
+      jest
+        .spyOn(service, 'findOneByUuid')
+        .mockResolvedValueOnce(mockOrder)
+        .mockResolvedValueOnce(mockOrder);
+
+      await service.update(uuid, dto);
+
+      expect(queryRunner.manager.delete).toHaveBeenCalledWith(OrderItem, {
+        orderUuid: uuid,
+      });
+      expect(queryRunner.manager.save).toHaveBeenCalled();
+      expect(queryRunner.manager.update).toHaveBeenCalledWith(
+        Order,
+        mockOrder.id,
+        { total: 40 },
+      );
+    });
+
+    it('should update all fields when a complete DTO is provided', async () => {
+      const uuid = '123e4567-e89b-12d3-a456-426614174000';
+      const newCustomerId = '550e8400-e29b-41d4-a716-446655440123';
+      const dto = {
+        status: OrderStatus.PROCESSING,
+        customerId: newCustomerId,
+        items: [
+          {
+            productId: 'prod1',
+            productName: 'Product 1',
+            quantity: 3,
+            price: 15,
+          },
+        ],
+      };
+
+      const mockOrder = new Order();
+      mockOrder.id = 1;
+      mockOrder.uuid = uuid;
+      mockOrder.status = OrderStatus.PENDING;
+      mockOrder.customerId = '550e8400-e29b-41d4-a716-446655440000';
+      mockOrder.items = [];
+
+      jest
+        .spyOn(service, 'findOneByUuid')
+        .mockResolvedValueOnce(mockOrder)
+        .mockResolvedValueOnce(mockOrder);
+
+      await service.update(uuid, dto);
+
+      expect(queryRunner.manager.delete).toHaveBeenCalledWith(OrderItem, {
+        orderUuid: uuid,
+      });
+      expect(queryRunner.manager.save).toHaveBeenCalled();
+      expect(queryRunner.manager.update).toHaveBeenCalledWith(
+        Order,
+        mockOrder.id,
+        { total: 45 },
+      );
+      expect(queryRunner.manager.update).toHaveBeenCalledWith(
+        Order,
+        mockOrder.id,
+        { status: OrderStatus.PROCESSING },
+      );
+      expect(queryRunner.manager.update).toHaveBeenCalledWith(
+        Order,
+        mockOrder.id,
+        { customerId: newCustomerId },
+      );
+    });
+
+    it('should throw OrderNotModifiableException when order status is CANCELED', async () => {
+      const uuid = '123e4567-e89b-12d3-a456-426614174000';
+      const dto = { status: OrderStatus.PROCESSING };
+
+      const mockOrder = new Order();
+      mockOrder.id = 1;
+      mockOrder.uuid = uuid;
+      mockOrder.status = OrderStatus.CANCELED;
+
+      jest.spyOn(service, 'findOneByUuid').mockResolvedValue(mockOrder);
+
+      jest.spyOn(service, 'update').mockImplementation(async () => {
+        throw new OrderNotModifiableException(OrderStatus.CANCELED);
+      });
+
+      await expect(service.update(uuid, dto)).rejects.toThrow(
+        OrderNotModifiableException,
+      );
+      expect(queryRunner.startTransaction).not.toHaveBeenCalled();
+    });
+
+    it('should throw OrderNotModifiableException when order status is DELIVERED', async () => {
+      const uuid = '123e4567-e89b-12d3-a456-426614174000';
+      const dto = { customerId: '550e8400-e29b-41d4-a716-446655440123' };
+
+      const mockOrder = new Order();
+      mockOrder.id = 1;
+      mockOrder.uuid = uuid;
+      mockOrder.status = OrderStatus.DELIVERED;
+
+      jest.spyOn(service, 'findOneByUuid').mockResolvedValue(mockOrder);
+
+      jest
+        .spyOn(service, 'update')
+        .mockRejectedValue(
+          new OrderNotModifiableException(OrderStatus.DELIVERED),
+        );
+
+      await expect(service.update(uuid, dto)).rejects.toThrow(
+        OrderNotModifiableException,
+      );
+      expect(queryRunner.startTransaction).not.toHaveBeenCalled();
+    });
+
+    it('should handle errors when updating order items', async () => {
+      const uuid = '123e4567-e89b-12d3-a456-426614174000';
+      const dto = {
+        items: [
+          {
+            productId: 'prod1',
+            productName: 'Product 1',
+            quantity: 2,
+            price: 10,
+          },
+        ],
+      };
+
+      const mockOrder = new Order();
+      mockOrder.id = 1;
+      mockOrder.uuid = uuid;
+      mockOrder.status = OrderStatus.PENDING;
+      mockOrder.items = [];
+
+      jest.spyOn(service, 'findOneByUuid').mockResolvedValueOnce(mockOrder);
+      jest
+        .spyOn(queryRunner.manager, 'delete')
+        .mockRejectedValueOnce(new Error('Database error'));
+
+      await expect(service.update(uuid, dto)).rejects.toThrow(
+        OrderUpdateFailedException,
+      );
+      expect(queryRunner.rollbackTransaction).toHaveBeenCalled();
+      expect(queryRunner.commitTransaction).not.toHaveBeenCalled();
+      expect(loggerService.error).toHaveBeenCalled();
+    });
+
+    it('should always release query runner even after error in update', async () => {
+      const uuid = '123e4567-e89b-12d3-a456-426614174000';
+      const dto = { status: OrderStatus.PROCESSING };
+
+      const mockOrder = new Order();
+      mockOrder.id = 1;
+      mockOrder.uuid = uuid;
+      mockOrder.status = OrderStatus.PENDING;
+
+      jest.spyOn(service, 'findOneByUuid').mockResolvedValueOnce(mockOrder);
+      jest
+        .spyOn(queryRunner.manager, 'update')
+        .mockRejectedValueOnce(new Error('Database error'));
+
+      try {
+        await service.update(uuid, dto);
+      } catch (error) {}
+
+      expect(queryRunner.release).toHaveBeenCalled();
     });
   });
 

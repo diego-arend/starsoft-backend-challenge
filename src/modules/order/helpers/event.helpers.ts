@@ -13,11 +13,21 @@ export function emitOrderEvent(
   logger: LoggerService,
 ): void {
   try {
+    logger.log(
+      `Emitting event ${eventType} for order ${order.uuid}`,
+      'EventHelper',
+    );
+
     eventEmitter.emit(eventType, {
       type: eventType,
       orderUuid: order.uuid,
       payload: order,
     });
+
+    logger.log(
+      `Event ${eventType} for order ${order.uuid} emitted successfully`,
+      'EventHelper',
+    );
   } catch (error) {
     logger.error(
       `Failed to emit ${eventType} event for order ${order.uuid}: ${error.message}`,

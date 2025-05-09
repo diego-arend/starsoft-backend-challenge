@@ -5,17 +5,22 @@ import { MetricsModule } from './metrics/metrics.module';
 import { LoggerModule } from './logger/logger.module';
 import { MetricsInterceptor } from './interceptors/metrics.interceptor';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_INTERCEPTOR, APP_FILTER } from '@nestjs/core';
 import { TraceIdInterceptor } from './interceptors/trace-id.interceptor';
-import { ElasticSearchModule } from './infraestructure/elastic/elastic.module';
 import { getTypeOrmConfig } from './infraestructure/postgress/dataSource';
 import { OrderModule } from './modules/order/order.module';
 import { SearchModule } from './modules/search/search.module';
 import { CommonModule } from './common/common.module';
+import { OrderExceptionFilter } from './modules/order/filters/order-exception.filter';
+import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ElasticsearchExceptionFilter } from './common/filters/elasticsearch-exception.filter';
+import { UuidValidationFilter } from './common/filters/uuid-validation.filter';
 
 @Module({
   imports: [
-    ConfigModule.forRoot(),
+    ConfigModule.forRoot({
+      isGlobal: true,
+    }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -23,10 +28,10 @@ import { CommonModule } from './common/common.module';
     }),
     MetricsModule,
     LoggerModule,
-    ElasticSearchModule,
     OrderModule,
     SearchModule,
     CommonModule,
+    EventEmitterModule.forRoot(),
   ],
   controllers: [AppController],
   providers: [
@@ -34,6 +39,18 @@ import { CommonModule } from './common/common.module';
     {
       provide: APP_INTERCEPTOR,
       useClass: TraceIdInterceptor,
+    },
+    {
+      provide: APP_FILTER,
+      useClass: UuidValidationFilter,
+    },
+    {
+      provide: APP_FILTER,
+      useClass: OrderExceptionFilter,
+    },
+    {
+      provide: APP_FILTER,
+      useClass: ElasticsearchExceptionFilter,
     },
   ],
 })

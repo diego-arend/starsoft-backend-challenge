@@ -9,6 +9,9 @@ import { Order, OrderStatus } from '../entities/order.entity';
  * @returns Total order amount in cents
  */
 export function calculateOrderTotal(items: OrderItemDto[]): number {
+  if (!items || !Array.isArray(items)) {
+    return 0;
+  }
   return items.reduce((sum, item) => sum + item.price * item.quantity, 0);
 }
 
@@ -16,16 +19,20 @@ export function calculateOrderTotal(items: OrderItemDto[]): number {
  * Creates OrderItem entities from DTOs
  *
  * @param items Item DTOs
- * @param orderId Parent order ID
+ * @param orderUuid Parent order UUID
  * @returns Array of OrderItem entities
  */
 export function createOrderItems(
   items: OrderItemDto[],
-  orderId: number,
+  orderUuid: string,
 ): OrderItem[] {
+  if (!items || !Array.isArray(items) || items.length === 0) {
+    return [];
+  }
+
   return items.map((item) => {
     const orderItem = new OrderItem();
-    orderItem.orderId = orderId;
+    orderItem.orderUuid = orderUuid;
     orderItem.productId = item.productId;
     orderItem.productName = item.productName;
     orderItem.price = item.price;
@@ -77,6 +84,9 @@ export function validateOrderItems(items: OrderItemDto[]): string[] {
  * @returns True if the order can be modified, false otherwise
  */
 export function canOrderBeModified(order: Order): boolean {
+  if (!order || !order.status) {
+    return false;
+  }
   return ![OrderStatus.DELIVERED, OrderStatus.CANCELED].includes(order.status);
 }
 
@@ -88,5 +98,6 @@ export function canOrderBeModified(order: Order): boolean {
  * @returns Formatted error message
  */
 export function formatErrorMessage(operation: string, error: any): string {
-  return `Failed to ${operation} order in PostgreSQL: ${error.message}`;
+  const errorMessage = error && error.message ? error.message : 'Unknown error';
+  return `Failed to ${operation} order in PostgreSQL: ${errorMessage}`;
 }

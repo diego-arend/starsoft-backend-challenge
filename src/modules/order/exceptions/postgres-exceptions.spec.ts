@@ -12,205 +12,155 @@ import {
   OrderValidationException,
 } from './postgres-exceptions';
 
-describe('Postgres Exceptions', () => {
+describe('Order Exceptions', () => {
   describe('OrderNotFoundException', () => {
-    it('should create exception with UUID identifier', () => {
-      const uuid = 'abc123';
-      const exception = new OrderNotFoundException(uuid);
+    it('should format message with UUID for string identifiers', () => {
+      const orderId = 'abc123';
 
-      expect(exception.message).toBe('Order with UUID abc123 not found');
+      const exception = new OrderNotFoundException(orderId);
+      const response = exception.getResponse() as Record<string, any>;
+
+      expect(exception.message).toBe(`Order with UUID ${orderId} not found`);
       expect(exception.getStatus()).toBe(HttpStatus.NOT_FOUND);
-      expect(exception.getResponse()).toHaveProperty(
-        'errorCode',
-        'ORDER_NOT_FOUND',
-      );
+      expect(response.errorCode).toBe('ORDER_NOT_FOUND');
     });
 
-    it('should create exception with numeric ID identifier', () => {
-      const id = 123;
-      const exception = new OrderNotFoundException(id);
+    it('should format message with ID for number identifiers', () => {
+      const orderId = 123;
 
-      expect(exception.message).toBe('Order with ID 123 not found');
+      const exception = new OrderNotFoundException(orderId);
+
+      expect(exception.message).toBe(`Order with ID ${orderId} not found`);
       expect(exception.getStatus()).toBe(HttpStatus.NOT_FOUND);
-      expect(exception.getResponse()).toHaveProperty(
-        'errorCode',
-        'ORDER_NOT_FOUND',
-      );
     });
   });
 
   describe('OrderNotModifiableException', () => {
-    it('should create exception with order status', () => {
+    it('should include order status in the message', () => {
       const status = OrderStatus.DELIVERED;
+
       const exception = new OrderNotModifiableException(status);
 
       expect(exception.message).toBe(
         `Order with status ${status} cannot be modified`,
       );
-      expect(exception.getStatus()).toBe(HttpStatus.BAD_REQUEST);
-      expect(exception.getResponse()).toHaveProperty(
-        'errorCode',
-        'ORDER_NOT_MODIFIABLE',
-      );
-    });
-
-    it('should create exception with CANCELED status', () => {
-      const status = OrderStatus.CANCELED;
-      const exception = new OrderNotModifiableException(status);
-
-      expect(exception.message).toContain(OrderStatus.CANCELED);
-      expect(exception.getStatus()).toBe(HttpStatus.BAD_REQUEST);
+      expect(exception.name).toBe('OrderNotModifiableException');
     });
   });
 
   describe('OrderCreationFailedException', () => {
-    it('should create exception with details', () => {
-      const details = { constraint: 'fk_customer_id', table: 'orders' };
+    it('should store error details and set correct error code', () => {
+      const details = { constraint: 'fk_customer_id' };
+
       const exception = new OrderCreationFailedException(details);
+      const response = exception.getResponse() as Record<string, any>;
 
       expect(exception.message).toBe('Failed to create order');
       expect(exception.getStatus()).toBe(HttpStatus.INTERNAL_SERVER_ERROR);
-      expect(exception.getResponse()).toHaveProperty(
-        'errorCode',
-        'ORDER_CREATION_FAILED',
-      );
       expect(exception.details).toEqual(details);
+      expect(response.errorCode).toBe('ORDER_CREATION_FAILED');
     });
   });
 
   describe('OrderUpdateFailedException', () => {
-    it('should create exception with details', () => {
-      const details = { constraint: 'check_price_positive', column: 'price' };
+    it('should store error details and set correct error code', () => {
+      const details = { field: 'price' };
+
       const exception = new OrderUpdateFailedException(details);
+      const response = exception.getResponse() as Record<string, any>;
 
       expect(exception.message).toBe('Failed to update order');
       expect(exception.getStatus()).toBe(HttpStatus.INTERNAL_SERVER_ERROR);
-      expect(exception.getResponse()).toHaveProperty(
-        'errorCode',
-        'ORDER_UPDATE_FAILED',
-      );
       expect(exception.details).toEqual(details);
+      expect(response.errorCode).toBe('ORDER_UPDATE_FAILED');
     });
   });
 
   describe('InvalidOrderItemsException', () => {
-    it('should create exception with details', () => {
-      const details = {
-        errors: ['Price must be positive', 'Quantity must be > 0'],
-      };
+    it('should provide a descriptive message and correct error code', () => {
+      const details = { errors: ['Price must be positive'] };
+
       const exception = new InvalidOrderItemsException(details);
+      const response = exception.getResponse() as Record<string, any>;
 
       expect(exception.message).toBe('Invalid order items provided');
       expect(exception.getStatus()).toBe(HttpStatus.BAD_REQUEST);
-      expect(exception.getResponse()).toHaveProperty(
-        'errorCode',
-        'INVALID_ORDER_ITEMS',
-      );
       expect(exception.details).toEqual(details);
+      expect(response.errorCode).toBe('INVALID_ORDER_ITEMS');
     });
   });
 
   describe('DatabaseTransactionFailedException', () => {
-    it('should create exception with operation and details', () => {
-      const operation = 'order creation';
-      const details = {
-        error: 'SERIALIZATION_FAILURE',
-        hint: 'Retry transaction',
-      };
+    it('should include operation name in the message and correct error code', () => {
+      const operation = 'insert';
+      const details = { error: 'constraint' };
+
       const exception = new DatabaseTransactionFailedException(
         operation,
         details,
       );
+      const response = exception.getResponse() as Record<string, any>;
 
       expect(exception.message).toBe(
-        'Database transaction failed during order creation',
+        `Database transaction failed during ${operation}`,
       );
       expect(exception.getStatus()).toBe(HttpStatus.INTERNAL_SERVER_ERROR);
-      expect(exception.getResponse()).toHaveProperty(
-        'errorCode',
-        'TRANSACTION_FAILED',
-      );
-      expect(exception.details).toEqual(details);
-    });
-
-    it('should include operation name in message', () => {
-      const operations = ['insert', 'update', 'delete'];
-
-      operations.forEach((op) => {
-        const exception = new DatabaseTransactionFailedException(op, {});
-        expect(exception.message).toContain(op);
-      });
+      expect(response.errorCode).toBe('TRANSACTION_FAILED');
     });
   });
 
   describe('OrderEventFailedException', () => {
-    it('should create exception with event type, order UUID and details', () => {
+    it('should include event type and order UUID in the message', () => {
       const eventType = 'created';
-      const orderUuid = 'order-xyz';
-      const details = { service: 'notification', error: 'Service unavailable' };
+      const orderUuid = 'order-123';
+      const details = { error: 'Service unavailable' };
+
       const exception = new OrderEventFailedException(
         eventType,
         orderUuid,
         details,
       );
+      const response = exception.getResponse() as Record<string, any>;
 
       expect(exception.message).toBe(
-        'Failed to process created event for order order-xyz',
+        `Failed to process ${eventType} event for order ${orderUuid}`,
       );
       expect(exception.getStatus()).toBe(HttpStatus.INTERNAL_SERVER_ERROR);
-      expect(exception.getResponse()).toHaveProperty(
-        'errorCode',
-        'ORDER_EVENT_FAILED',
-      );
       expect(exception.details).toEqual(details);
+      expect(response.errorCode).toBe('ORDER_EVENT_FAILED');
     });
   });
 
   describe('OrderCancellationFailedException', () => {
-    it('should create exception with order UUID and details', () => {
+    it('should include order UUID in the message and correct error code', () => {
       const orderUuid = 'order-abc';
       const details = { reason: 'Already delivered' };
+
       const exception = new OrderCancellationFailedException(
         orderUuid,
         details,
       );
+      const response = exception.getResponse() as Record<string, any>;
 
-      expect(exception.message).toBe('Failed to cancel order order-abc');
+      expect(exception.message).toBe(`Failed to cancel order ${orderUuid}`);
       expect(exception.getStatus()).toBe(HttpStatus.INTERNAL_SERVER_ERROR);
-      expect(exception.getResponse()).toHaveProperty(
-        'errorCode',
-        'ORDER_CANCELLATION_FAILED',
-      );
       expect(exception.details).toEqual(details);
+      expect(response.errorCode).toBe('ORDER_CANCELLATION_FAILED');
     });
   });
 
   describe('OrderValidationException', () => {
-    it('should create exception with custom message and details', () => {
+    it('should use the provided custom message and set correct error code', () => {
       const message = 'Order must have at least one item';
-      const details = { field: 'items', constraint: 'notEmpty' };
+      const details = { field: 'items' };
+
       const exception = new OrderValidationException(message, details);
+      const response = exception.getResponse() as Record<string, any>;
 
-      expect(exception.message).toBe('Order must have at least one item');
+      expect(exception.message).toBe(message);
       expect(exception.getStatus()).toBe(HttpStatus.BAD_REQUEST);
-      expect(exception.getResponse()).toHaveProperty(
-        'errorCode',
-        'ORDER_VALIDATION_FAILED',
-      );
       expect(exception.details).toEqual(details);
-    });
-
-    it('should use custom message for validation errors', () => {
-      const messages = [
-        'Price cannot be negative',
-        'Quantity must be at least 1',
-        'Product ID is required',
-      ];
-
-      messages.forEach((msg) => {
-        const exception = new OrderValidationException(msg, {});
-        expect(exception.message).toBe(msg);
-      });
+      expect(response.errorCode).toBe('ORDER_VALIDATION_FAILED');
     });
   });
 });

@@ -8,6 +8,7 @@ import {
 } from 'typeorm';
 import { Order } from './order.entity';
 import { v4 as uuidv4 } from 'uuid';
+import { Exclude } from 'class-transformer';
 
 @Entity('order_items')
 export class OrderItem {
@@ -32,13 +33,14 @@ export class OrderItem {
   @Column('int')
   subtotal: number;
 
-  @Column({ name: 'order_id' })
-  orderId: number;
+  @Column({ name: 'order_uuid' })
+  orderUuid: string;
 
+  @Exclude() // Exclui o objeto completo da ordem para evitar recursão
   @ManyToOne(() => Order, (order) => order.items, {
     onDelete: 'CASCADE',
   })
-  @JoinColumn({ name: 'order_id' })
+  @JoinColumn({ name: 'order_uuid', referencedColumnName: 'uuid' })
   order: Order;
 
   @BeforeInsert()

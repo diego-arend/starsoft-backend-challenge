@@ -1,312 +1,242 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ElasticsearchService } from '@nestjs/elasticsearch';
-import { DateRangeDto } from './dto/search-query.dto';
-import { SearchResult } from './interfaces/search-result.interface';
 import { OrderStatus } from '../order/entities/order.entity';
-import {
-  InvalidSearchParametersException,
-  SearchExecutionException,
-} from './exceptions/search-exceptions';
-import {
-  createUuidSearchRequest,
-  createStatusSearchRequest,
-  createDateRangeSearchRequest,
-  createProductIdSearchRequest,
-  createProductNameSearchRequest,
-  createCustomerIdSearchRequest,
-} from './helpers/elasticsearch.helpers';
-import {
-  validateSearchText,
-  validateDateRange,
-} from './helpers/validation.helpers';
-import { logSearchError, logSearchSuccess } from './helpers/logger.helpers';
-import { executeSearch } from './helpers/search.helpers';
-import { PaginationService } from '../../common/services/pagination.service';
 import { PaginationDto } from '../../common/dto/pagination.dto';
+import { PaginatedResult } from '../../common/interfaces/paginated-result.interface';
+import { PaginationService } from '../../common/services/pagination.service';
+import { ElasticsearchSearchException } from '../../common/exceptions/elasticsearch-exceptions';
+import {
+  InvalidDateRangeException,
+  InvalidItemsQueryException,
+} from './exceptions/search-exceptions';
+import { DateRangeParams } from './types/search.types';
+import { SearchValidator } from './utils/search-validator.util';
+import { ElasticsearchQueryBuilder } from './utils/elasticsearch-query.util';
+import { ProductProcessor } from './utils/product-processor.util';
 
+/**
+ * Service responsible for handling search operations through Elasticsearch
+ * Simplified version for testing
+ */
 @Injectable()
 export class SearchService {
   private readonly logger = new Logger(SearchService.name);
   private readonly indexName = 'orders';
 
+  /**
+   * Creates an instance of SearchService
+   *
+   * @param elasticsearchService - Elasticsearch client service
+   * @param paginationService - Service to handle pagination
+   */
   constructor(
     private readonly elasticsearchService: ElasticsearchService,
     private readonly paginationService: PaginationService,
-  ) {}
-
-  /**
-   * Finds an order by its UUID
-   */
-  async findByUuid(uuid: string) {
-    try {
-      const searchRequest = createUuidSearchRequest(uuid, this.indexName);
-      const response = await executeSearch(
-        this.elasticsearchService,
-        searchRequest,
-      );
-
-      if (response.total === 0) {
-        throw new NotFoundException(`Order with UUID ${uuid} not found`);
-      }
-
-      logSearchSuccess(this.logger, 'findByUuid', `UUID: ${uuid}`);
-      return response.items[0];
-    } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
-      logSearchError(this.logger, 'findByUuid', error, `UUID: ${uuid}`);
-      throw new SearchExecutionException(error.message);
-    }
+  ) {
+    this.logger.log(`Search service initialized with index: ${this.indexName}`);
   }
 
   /**
-   * Finds orders by status
+   * Find orders by status with pagination
+   *
+   * @param status - The order status to search for
+   * @param paginationDto - Pagination parameters
+   * @returns Paginated list of orders (empty array if none found)
+   * @throws ElasticsearchSearchException if the search operation fails
    */
   async findByStatus(
     status: OrderStatus,
-    paginationDto?: PaginationDto,
-  ): Promise<SearchResult> {
+    paginationDto: PaginationDto = new PaginationDto(),
+  ): Promise<PaginatedResult<any>> {
     try {
-      const { page, limit } =
+      this.logger.debug(`Searching for orders with status: ${status}`);
+
+      const { page, limit, skip } =
         this.paginationService.getPaginationParams(paginationDto);
 
-      const esParams =
-        this.paginationService.getElasticsearchPaginationParams(paginationDto);
+      const searchResponse = await this.elasticsearchService.search({
+        index: this.indexName,
+        query: ElasticsearchQueryBuilder.buildStatusQuery(status),
+        sort: [{ createdAt: { order: 'desc' } }],
+        from: skip,
+        size: limit,
+      });
 
-      const searchRequest = createStatusSearchRequest(
-        status,
-        this.indexName,
-        esParams.from,
-        esParams.size,
-      );
+      if (!searchResponse.hits?.hits) {
+        this.logger.debug(`No hits returned for status: ${status}`);
+        return this.paginationService.createPaginatedResult([], 0, page, limit);
+      }
 
-      const result = await executeSearch(
-        this.elasticsearchService,
-        searchRequest,
+      const orders = searchResponse.hits.hits.map((hit) => hit._source);
+      const total =
+        typeof searchResponse.hits.total === 'number'
+          ? searchResponse.hits.total
+          : searchResponse.hits.total?.value || 0;
+
+      this.logger.debug(`Found ${total} orders with status: ${status}`);
+
+      return this.paginationService.createPaginatedResult(
+        orders,
+        total,
         page,
         limit,
       );
-
-      logSearchSuccess(
-        this.logger,
-        'findByStatus',
-        `status: ${status}, found: ${result.total} orders`,
-      );
-      return result;
     } catch (error) {
-      logSearchError(this.logger, 'findByStatus', error, `status: ${status}`);
-      if (
-        error instanceof InvalidSearchParametersException ||
-        error instanceof SearchExecutionException
-      ) {
-        throw error;
-      }
-      throw new SearchExecutionException(error.message);
+      this.logger.error(
+        `Error searching for orders with status ${status}: ${error.message}`,
+      );
+
+      throw new ElasticsearchSearchException(
+        `Failed to search for orders with status ${status}`,
+        error,
+      );
     }
   }
 
   /**
-   * Finds orders created within a date range
+   * Find orders within a date range with pagination
+   *
+   * @param dateRange - The date range parameters (from and to dates)
+   * @param paginationDto - Pagination parameters
+   * @returns Paginated list of orders (empty array if none found)
+   * @throws InvalidDateRangeException if the date range is invalid
+   * @throws ElasticsearchSearchException if the search operation fails
    */
   async findByDateRange(
-    dateRange: DateRangeDto,
-    paginationDto?: PaginationDto,
-  ): Promise<SearchResult> {
+    dateRange: DateRangeParams,
+    paginationDto: PaginationDto = new PaginationDto(),
+  ): Promise<PaginatedResult<any>> {
     try {
-      validateDateRange(dateRange.from, dateRange.to);
+      SearchValidator.validateDateRange(dateRange);
 
-      const { page, limit } =
+      const { page, limit, skip } =
         this.paginationService.getPaginationParams(paginationDto);
-      const esParams =
-        this.paginationService.getElasticsearchPaginationParams(paginationDto);
 
-      const searchRequest = createDateRangeSearchRequest(
-        dateRange,
-        this.indexName,
-        esParams.from,
-        esParams.size,
+      const rangeDescription =
+        SearchValidator.getDateRangeDescription(dateRange);
+      this.logger.debug(
+        `Searching for orders in date range: ${rangeDescription}`,
       );
 
-      const result = await executeSearch(
-        this.elasticsearchService,
-        searchRequest,
+      const searchResponse = await this.elasticsearchService.search({
+        index: this.indexName,
+        query: ElasticsearchQueryBuilder.buildDateRangeQuery(dateRange),
+        sort: [{ createdAt: { order: 'desc' } }],
+        from: skip,
+        size: limit,
+      });
+
+      if (!searchResponse.hits?.hits) {
+        this.logger.debug(
+          `No hits returned for date range: ${rangeDescription}`,
+        );
+        return this.paginationService.createPaginatedResult([], 0, page, limit);
+      }
+
+      const orders = searchResponse.hits.hits.map((hit) => hit._source);
+      const total =
+        typeof searchResponse.hits.total === 'number'
+          ? searchResponse.hits.total
+          : searchResponse.hits.total?.value || 0;
+
+      this.logger.debug(
+        `Found ${total} orders in date range: ${rangeDescription}`,
+      );
+
+      return this.paginationService.createPaginatedResult(
+        orders,
+        total,
         page,
         limit,
       );
-
-      logSearchSuccess(
-        this.logger,
-        'findByDateRange',
-        `from: ${dateRange.from || 'any'}, to: ${dateRange.to || 'any'}, found: ${result.total} orders`,
-      );
-      return result;
     } catch (error) {
-      logSearchError(
-        this.logger,
-        'findByDateRange',
-        error,
-        `from: ${dateRange.from}, to: ${dateRange.to}`,
-      );
-      if (
-        error instanceof InvalidSearchParametersException ||
-        error instanceof SearchExecutionException
-      ) {
+      if (error instanceof InvalidDateRangeException) {
         throw error;
       }
-      throw new SearchExecutionException(error.message);
+
+      this.logger.error(
+        `Error searching for orders in date range: ${error.message}`,
+      );
+
+      throw new ElasticsearchSearchException(
+        `Failed to search for orders in date range`,
+        error,
+      );
     }
   }
 
   /**
-   * Finds orders containing a specific product by ID
+   * Find unique product items matching the search query
+   *
+   * @param itemsQuery - Query string containing product names (comma-separated)
+   * @param paginationDto - Pagination parameters
+   * @returns Paginated list of unique product items matching the search
+   * @throws InvalidItemsQueryException if the items query is invalid
+   * @throws ElasticsearchSearchException if the search operation fails
    */
-  async findByProductId(
-    productId: string,
-    paginationDto?: PaginationDto,
-  ): Promise<SearchResult> {
+  async findByItems(
+    itemsQuery: string,
+    paginationDto: PaginationDto = new PaginationDto(),
+  ): Promise<PaginatedResult<any>> {
     try {
-      const { page, limit } =
-        this.paginationService.getPaginationParams(paginationDto);
-      const esParams =
-        this.paginationService.getElasticsearchPaginationParams(paginationDto);
+      const items = SearchValidator.validateAndParseItemsQuery(itemsQuery);
 
-      const searchRequest = createProductIdSearchRequest(
-        productId,
-        this.indexName,
-        esParams.from,
-        esParams.size,
+      this.logger.debug(`Searching for products: ${items.join(', ')}`);
+
+      const searchResponse = await this.elasticsearchService.search({
+        index: this.indexName,
+        query: ElasticsearchQueryBuilder.buildItemsQuery(items),
+        size: 100,
+        _source: ['items'],
+      });
+
+      if (!searchResponse.hits?.hits) {
+        this.logger.debug(`No hits returned for items query: ${itemsQuery}`);
+        return this.paginationService.createPaginatedResult(
+          [],
+          0,
+          paginationDto.page || 1,
+          paginationDto.limit || 10,
+        );
+      }
+
+      const uniqueProducts = ProductProcessor.extractUniqueProducts(
+        searchResponse.hits.hits,
+        items,
       );
 
-      const result = await executeSearch(
-        this.elasticsearchService,
-        searchRequest,
+      const { page, limit } =
+        this.paginationService.getPaginationParams(paginationDto);
+
+      const paginatedProducts = ProductProcessor.paginateProducts(
+        uniqueProducts,
         page,
         limit,
       );
 
-      logSearchSuccess(
-        this.logger,
-        'findByProductId',
-        `productId: ${productId}, found: ${result.total} orders`,
-      );
-      return result;
-    } catch (error) {
-      logSearchError(
-        this.logger,
-        'findByProductId',
-        error,
-        `productId: ${productId}`,
-      );
-      if (
-        error instanceof InvalidSearchParametersException ||
-        error instanceof SearchExecutionException
-      ) {
-        throw error;
-      }
-      throw new SearchExecutionException(error.message);
-    }
-  }
-
-  /**
-   * Finds orders containing products with names matching the search text
-   */
-  async findByProductName(
-    productName: string,
-    paginationDto?: PaginationDto,
-  ): Promise<SearchResult> {
-    try {
-      validateSearchText(productName, 'Product name');
-
-      const { page, limit } =
-        this.paginationService.getPaginationParams(paginationDto);
-      const esParams =
-        this.paginationService.getElasticsearchPaginationParams(paginationDto);
-
-      const searchRequest = createProductNameSearchRequest(
-        productName,
-        this.indexName,
-        esParams.from,
-        esParams.size,
+      this.logger.debug(
+        `Found ${uniqueProducts.length} unique products matching the query`,
       );
 
-      const result = await executeSearch(
-        this.elasticsearchService,
-        searchRequest,
+      return this.paginationService.createPaginatedResult(
+        paginatedProducts,
+        uniqueProducts.length,
         page,
         limit,
       );
-
-      logSearchSuccess(
-        this.logger,
-        'findByProductName',
-        `query: ${productName}, found: ${result.total} orders`,
-      );
-      return result;
     } catch (error) {
-      logSearchError(
-        this.logger,
-        'findByProductName',
-        error,
-        `query: ${productName}`,
-      );
-      if (
-        error instanceof InvalidSearchParametersException ||
-        error instanceof SearchExecutionException
-      ) {
+      if (error instanceof InvalidItemsQueryException) {
         throw error;
       }
-      throw new SearchExecutionException(error.message);
-    }
-  }
 
-  /**
-   * Finds orders for a specific customer
-   */
-  async findByCustomerId(
-    customerId: string,
-    paginationDto?: PaginationDto,
-  ): Promise<SearchResult> {
-    try {
-      const { page, limit } =
-        this.paginationService.getPaginationParams(paginationDto);
-      const esParams =
-        this.paginationService.getElasticsearchPaginationParams(paginationDto);
-
-      const searchRequest = createCustomerIdSearchRequest(
-        customerId,
-        this.indexName,
-        esParams.from,
-        esParams.size,
+      this.logger.error(
+        `Error searching for products with query "${itemsQuery}": ${error.message}`,
       );
 
-      const result = await executeSearch(
-        this.elasticsearchService,
-        searchRequest,
-        page,
-        limit,
-      );
-
-      logSearchSuccess(
-        this.logger,
-        'findByCustomerId',
-        `customerId: ${customerId}, found: ${result.total} orders`,
-      );
-      return result;
-    } catch (error) {
-      logSearchError(
-        this.logger,
-        'findByCustomerId',
+      throw new ElasticsearchSearchException(
+        `Failed to search for products`,
         error,
-        `customerId: ${customerId}`,
       );
-      if (
-        error instanceof InvalidSearchParametersException ||
-        error instanceof SearchExecutionException
-      ) {
-        throw error;
-      }
-      throw new SearchExecutionException(error.message);
     }
   }
 }

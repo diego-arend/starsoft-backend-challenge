@@ -9,12 +9,13 @@ import { APP_INTERCEPTOR, APP_FILTER } from '@nestjs/core';
 import { TraceIdInterceptor } from './interceptors/trace-id.interceptor';
 import { getTypeOrmConfig } from './infraestructure/postgress/dataSource';
 import { OrderModule } from './modules/order/order.module';
-import { SearchModule } from './modules/search/search.module';
 import { CommonModule } from './common/common.module';
 import { OrderExceptionFilter } from './modules/order/filters/order-exception.filter';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ElasticsearchExceptionFilter } from './common/filters/elasticsearch-exception.filter';
 import { UuidValidationFilter } from './common/filters/uuid-validation.filter';
+import { SearchModule } from './modules/search/search.module';
+import { ElasticsearchConfigModule } from './infraestructure/elasticsearch/elasticsearch.module';
 
 @Module({
   imports: [
@@ -29,9 +30,10 @@ import { UuidValidationFilter } from './common/filters/uuid-validation.filter';
     MetricsModule,
     LoggerModule,
     OrderModule,
-    SearchModule,
     CommonModule,
     EventEmitterModule.forRoot(),
+    SearchModule,
+    ElasticsearchConfigModule,
   ],
   controllers: [AppController],
   providers: [

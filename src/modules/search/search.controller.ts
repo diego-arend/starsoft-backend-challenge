@@ -1,114 +1,125 @@
-import { Controller, Get, Query, Param } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Query,
+  UseInterceptors,
+  ClassSerializerInterceptor,
+  HttpCode,
+  HttpStatus,
+  UseFilters,
+} from '@nestjs/common';
 import {
   ApiTags,
-  ApiOperation,
+  ApiExtraModels,
   ApiResponse,
+  ApiOperation,
   ApiQuery,
-  ApiParam,
 } from '@nestjs/swagger';
 import { SearchService } from './search.service';
-import { DateRangeDto } from './dto/search-query.dto';
-import {
-  PaginationApiQueries,
-  SearchApiOperations,
-  SearchApiParams,
-  SearchApiQueries,
-  CommonSearchResponses,
-} from './swagger/search-swagger.responses';
 import { OrderStatus } from '../order/entities/order.entity';
-import { PaginationDto } from '../../common/dto/pagination.dto';
+import { PaginatedResult } from '../../common/interfaces/paginated-result.interface';
+import { OrderResponseDto } from '../order/dto/order-response.dto';
+import { SearchExceptionFilter } from './filters/search-exception.filter';
+import { ErrorResponseDto } from '../../common/dto/error-response.dto';
+import {
+  InvalidDateRangeException,
+  InvalidItemsQueryException,
+} from './exceptions/search-exceptions';
+import { ElasticsearchSearchException } from '../../common/exceptions/elasticsearch-exceptions';
+import {
+  SearchSwaggerResponses,
+  SwaggerParams,
+  SwaggerOperations,
+  ElasticsearchErrorResponse,
+  ElasticsearchDateErrorResponse,
+  ElasticsearchItemsErrorResponse,
+} from './swagger/search-swagger-response';
 
 @ApiTags('search')
 @Controller('search')
+@UseInterceptors(ClassSerializerInterceptor)
+@UseFilters(SearchExceptionFilter)
+@ApiExtraModels(
+  OrderResponseDto,
+  ErrorResponseDto,
+  InvalidDateRangeException,
+  InvalidItemsQueryException,
+  ElasticsearchSearchException,
+)
 export class SearchController {
   constructor(private readonly searchService: SearchService) {}
 
-  @Get('orders/uuid/:uuid')
-  @ApiOperation(SearchApiOperations.findByUuid)
-  @ApiParam(SearchApiParams.uuid)
-  @ApiResponse({ status: 200, description: 'Order found successfully' })
-  @ApiResponse({ status: 404, description: 'Order not found' })
-  @ApiResponse(CommonSearchResponses[0])
-  @ApiResponse(CommonSearchResponses[1])
-  async findByUuid(@Param('uuid') uuid: string) {
-    return this.searchService.findByUuid(uuid);
-  }
-
-  @Get('orders/status/:status')
-  @ApiOperation(SearchApiOperations.findByStatus)
-  @ApiParam(SearchApiParams.status)
-  @ApiQuery(PaginationApiQueries[0])
-  @ApiQuery(PaginationApiQueries[1])
-  @ApiResponse({ status: 200, description: 'Orders found successfully' })
-  @ApiResponse(CommonSearchResponses[0])
-  @ApiResponse(CommonSearchResponses[1])
+  @Get('by-status')
+  @ApiOperation(SwaggerOperations.FindByStatus)
+  @ApiQuery(SwaggerParams.Status)
+  @ApiQuery(SwaggerParams.Page)
+  @ApiQuery(SwaggerParams.Limit)
+  @ApiResponse({
+    ...SearchSwaggerResponses.FindByStatus.Success,
+    status: 200,
+  })
+  @ApiResponse(SearchSwaggerResponses.FindByStatus.BadRequest)
+  @ApiResponse(ElasticsearchErrorResponse)
+  @HttpCode(HttpStatus.OK)
   async findByStatus(
-    @Param('status') status: OrderStatus,
-    @Query() paginationDto: PaginationDto,
-  ) {
-    return this.searchService.findByStatus(status, paginationDto);
+    @Query('status') status: string,
+    @Query('page') page: number = 1,
+    @Query('limit') limit: number = 10,
+  ): Promise<PaginatedResult<OrderResponseDto>> {
+    return this.searchService.findByStatus(status as OrderStatus, {
+      page,
+      limit,
+    });
   }
 
-  @Get('orders/date-range')
-  @ApiOperation(SearchApiOperations.findByDateRange)
-  @ApiQuery(SearchApiQueries.dateFrom)
-  @ApiQuery(SearchApiQueries.dateTo)
-  @ApiQuery(PaginationApiQueries[0])
-  @ApiQuery(PaginationApiQueries[1])
-  @ApiResponse({ status: 200, description: 'Orders found successfully' })
-  @ApiResponse(CommonSearchResponses[0])
-  @ApiResponse(CommonSearchResponses[1])
+  @Get('by-date')
+  @ApiOperation(SwaggerOperations.FindByDateRange)
+  @ApiQuery(SwaggerParams.DateFrom)
+  @ApiQuery(SwaggerParams.DateTo)
+  @ApiQuery(SwaggerParams.Page)
+  @ApiQuery(SwaggerParams.Limit)
+  @ApiResponse({
+    ...SearchSwaggerResponses.FindByDateRange.Success,
+    status: 200,
+  })
+  @ApiResponse(SearchSwaggerResponses.FindByDateRange.BadRequest)
+  @ApiResponse(ElasticsearchDateErrorResponse)
+  @HttpCode(HttpStatus.OK)
   async findByDateRange(
     @Query('from') from?: string,
     @Query('to') to?: string,
-    @Query() paginationDto?: PaginationDto,
-  ) {
-    const dateRange: DateRangeDto = { from, to };
-    return this.searchService.findByDateRange(dateRange, paginationDto);
+    @Query('page') page: number = 1,
+    @Query('limit') limit: number = 10,
+  ): Promise<PaginatedResult<OrderResponseDto>> {
+    return this.searchService.findByDateRange(
+      { from, to },
+      {
+        page,
+        limit,
+      },
+    );
   }
 
-  @Get('orders/product/:productId')
-  @ApiOperation(SearchApiOperations.findByProductId)
-  @ApiParam(SearchApiParams.productId)
-  @ApiQuery(PaginationApiQueries[0])
-  @ApiQuery(PaginationApiQueries[1])
-  @ApiResponse({ status: 200, description: 'Orders found successfully' })
-  @ApiResponse(CommonSearchResponses[0])
-  @ApiResponse(CommonSearchResponses[1])
-  async findByProductId(
-    @Param('productId') productId: string,
-    @Query() paginationDto: PaginationDto,
-  ) {
-    return this.searchService.findByProductId(productId, paginationDto);
-  }
-
-  @Get('orders/product-name')
-  @ApiOperation(SearchApiOperations.findByProductName)
-  @ApiQuery(SearchApiQueries.productName)
-  @ApiQuery(PaginationApiQueries[0])
-  @ApiQuery(PaginationApiQueries[1])
-  @ApiResponse({ status: 200, description: 'Orders found successfully' })
-  @ApiResponse(CommonSearchResponses[0])
-  @ApiResponse(CommonSearchResponses[1])
-  async findByProductName(
-    @Query('q') productName: string,
-    @Query() paginationDto: PaginationDto,
-  ) {
-    return this.searchService.findByProductName(productName, paginationDto);
-  }
-
-  @Get('orders/customer/:customerId')
-  @ApiOperation(SearchApiOperations.findByCustomerId)
-  @ApiParam(SearchApiParams.customerId)
-  @ApiQuery(PaginationApiQueries[0])
-  @ApiQuery(PaginationApiQueries[1])
-  @ApiResponse({ status: 200, description: 'Orders found successfully' })
-  @ApiResponse(CommonSearchResponses[0])
-  @ApiResponse(CommonSearchResponses[1])
-  async findByCustomerId(
-    @Param('customerId') customerId: string,
-    @Query() paginationDto: PaginationDto,
-  ) {
-    return this.searchService.findByCustomerId(customerId, paginationDto);
+  @Get('by-items')
+  @ApiOperation(SwaggerOperations.FindByItems)
+  @ApiQuery(SwaggerParams.Items)
+  @ApiQuery(SwaggerParams.Page)
+  @ApiQuery(SwaggerParams.Limit)
+  @ApiResponse({
+    ...SearchSwaggerResponses.FindByItems.Success,
+    status: 200,
+  })
+  @ApiResponse(SearchSwaggerResponses.FindByItems.BadRequest)
+  @ApiResponse(ElasticsearchItemsErrorResponse)
+  @HttpCode(HttpStatus.OK)
+  async findByItems(
+    @Query('items') items: string,
+    @Query('page') page: number = 1,
+    @Query('limit') limit: number = 10,
+  ): Promise<PaginatedResult<OrderResponseDto>> {
+    return this.searchService.findByItems(items, {
+      page,
+      limit,
+    });
   }
 }

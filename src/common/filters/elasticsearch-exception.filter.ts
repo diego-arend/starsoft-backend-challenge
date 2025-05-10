@@ -22,14 +22,12 @@ export class ElasticsearchExceptionFilter implements ExceptionFilter {
     const request = ctx.getRequest();
     const status = HttpStatus.NOT_FOUND;
 
-    // Get the resource ID from the URL parameters
     const resourceId = this.extractResourceIdFromRequest(request);
 
     this.logger.warn(
       `Resource not found: ${exception.message} (${request.method} ${request.url})`,
     );
 
-    // Return a standard 404 response
     response.status(status).json({
       statusCode: status,
       message: `Resource with id '${resourceId}' not found`,
@@ -42,10 +40,8 @@ export class ElasticsearchExceptionFilter implements ExceptionFilter {
    * Extract resource ID from request URL parameters
    */
   private extractResourceIdFromRequest(request: any): string {
-    // Try to get ID from route params
     const params = request.params || {};
 
-    // Look for common parameter names like id, uuid, etc.
     const commonIdFields = ['id', 'uuid', 'resourceId'];
     for (const field of commonIdFields) {
       if (params[field]) {
@@ -53,7 +49,6 @@ export class ElasticsearchExceptionFilter implements ExceptionFilter {
       }
     }
 
-    // If no ID is found in params, return a placeholder
     return 'unknown';
   }
 }

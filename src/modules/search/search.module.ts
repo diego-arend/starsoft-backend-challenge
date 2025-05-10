@@ -1,15 +1,14 @@
 import { Module } from '@nestjs/common';
-import { ElasticsearchModule } from '@nestjs/elasticsearch';
 import { SearchController } from './search.controller';
 import { SearchService } from './search.service';
+import { CommonModule } from '../../common/common.module';
+import { ElasticsearchConfigModule } from '../../infraestructure/elasticsearch/elasticsearch.module';
+import { LoggerModule } from '../../logger/logger.module';
 
 @Module({
-  imports: [
-    ElasticsearchModule.register({
-      node: process.env.ELASTICSEARCH_NODE,
-    }),
-  ],
+  imports: [CommonModule, ElasticsearchConfigModule, LoggerModule],
   controllers: [SearchController],
   providers: [SearchService],
+  exports: [SearchService],
 })
 export class SearchModule {}

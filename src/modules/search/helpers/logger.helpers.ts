@@ -1,32 +1,22 @@
-import { Logger } from '@nestjs/common';
+import { LoggerService } from '../../../logger/logger.service';
 
 /**
- * Logs search errors with consistent format
+ * Logs a search error with standardized format
+ *
+ * @param logger Logger service instance
+ * @param operation Operation that failed
+ * @param error Error
+ * @param context Context for the log
  */
 export function logSearchError(
-  logger: Logger,
+  logger: LoggerService,
   operation: string,
   error: any,
-  context?: string,
+  context: string = 'SearchService',
 ): void {
   logger.error(
-    `Search ${operation} failed: ${error.message}`,
+    `Failed to ${operation} search: ${error.message}`,
     error.stack,
-    context || 'SearchService',
-  );
-}
-
-/**
- * Logs search success with consistent format
- */
-export function logSearchSuccess(
-  logger: Logger,
-  operation: string,
-  details: string,
-  context?: string,
-): void {
-  logger.log(
-    `Search ${operation} succeeded: ${details}`,
-    context || 'SearchService',
+    context,
   );
 }

@@ -200,10 +200,21 @@ export class SearchService {
         );
       }
 
-      const uniqueProducts = ProductProcessor.extractUniqueProducts(
+      const allUniqueProducts = ProductProcessor.extractUniqueProducts(
         searchResponse.hits.hits,
-        items,
       );
+
+      const uniqueProducts = allUniqueProducts.filter((product) => {
+        return items.some(
+          (searchItem) =>
+            product.productName
+              ?.toLowerCase()
+              .includes(searchItem.toLowerCase()) ||
+            product.description
+              ?.toLowerCase()
+              .includes(searchItem.toLowerCase()),
+        );
+      });
 
       const { page, limit } =
         this.paginationService.getPaginationParams(paginationDto);

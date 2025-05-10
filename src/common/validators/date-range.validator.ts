@@ -17,29 +17,24 @@ export class IsValidDateRange implements ValidatorConstraintInterface {
    * @returns true if the date range is valid, false otherwise
    */
   validate(value: any): boolean {
-    // Value should be an object with optional from and to properties
     if (!value || typeof value !== 'object') {
       return false;
     }
 
     const { from, to } = value;
 
-    // At least one date must be provided
     if (!from && !to) {
       return false;
     }
 
-    // If both dates are provided, check that 'from' is before 'to'
     if (from && to) {
       const fromDate = new Date(from);
       const toDate = new Date(to);
 
-      // Check for invalid dates
       if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
         return false;
       }
 
-      // 'from' date must be before or equal to 'to' date
       return fromDate <= toDate;
     }
 

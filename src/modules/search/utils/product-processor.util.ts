@@ -10,10 +10,7 @@ export class ProductProcessor {
    * @param searchTerms Search terms for filtering
    * @returns Array of unique products
    */
-  static extractUniqueProducts(
-    searchHits: any[],
-    searchTerms: string[],
-  ): any[] {
+  static extractUniqueProducts(searchHits: any[]): any[] {
     // Extract all products from all orders
     let allProducts = [];
     searchHits.forEach((hit) => {
@@ -31,16 +28,7 @@ export class ProductProcessor {
       }
     });
 
-    // Convert Map back to array and filter for matching items
-    return Array.from(productMap.values()).filter((product) => {
-      return searchTerms.some(
-        (searchItem) =>
-          product.productName
-            ?.toLowerCase()
-            .includes(searchItem.toLowerCase()) ||
-          product.description?.toLowerCase().includes(searchItem.toLowerCase()),
-      );
-    });
+    return Array.from(productMap.values());
   }
 
   /**

@@ -57,19 +57,31 @@ export class SearchValidator {
   }
 
   /**
-   * Validates if a string is a valid date format (YYYY-MM-DD)
+   * Validates if a string is a valid date format (YYYY-MM-DD) and represents a real date
    * @param dateString The date string to validate
    * @returns True if the date is valid, false otherwise
    */
   static isValidDate(dateString: string): boolean {
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-
     if (!dateRegex.test(dateString)) {
       return false;
     }
 
-    const date = new Date(dateString);
-    return !isNaN(date.getTime());
+    const parts = dateString.split('-');
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10);
+    const day = parseInt(parts[2], 10);
+
+    if (month < 1 || month > 12) {
+      return false;
+    }
+
+    const daysInMonth = new Date(year, month, 0).getDate();
+    if (day < 1 || day > daysInMonth) {
+      return false;
+    }
+
+    return true;
   }
 
   /**

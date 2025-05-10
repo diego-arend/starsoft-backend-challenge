@@ -97,6 +97,12 @@ services:
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 5000
       KAFKA_METADATA_MAX_AGE_MS: 60000
       KAFKA_LEADER_IMBALANCE_CHECK_INTERVAL_SECONDS: 300
+      # Configuração para líderes ociosos
+      KAFKA_LEADER_ELECTION_THROTTLE_RATE: 1000
+      KAFKA_LEADER_IMBALANCE_PER_BROKER_PERCENTAGE: 10
+      # Novos timeouts para criação de tópicos
+      KAFKA_CONTROLLER_SOCKET_TIMEOUT_MS: 30000
+      KAFKA_TOPIC_CREATION_TIMEOUT_MS: 30000
     depends_on:
       - zookeeper
     volumes:

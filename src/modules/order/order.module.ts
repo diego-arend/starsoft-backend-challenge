@@ -13,12 +13,15 @@ import { OrderExceptionFilter } from './filters/order-exception.filter';
 import { LoggerModule } from '../../logger/logger.module';
 import { ElasticsearchConfigModule } from '../../infraestructure/elasticsearch/elasticsearch.module';
 import { OrderEventsListener } from './listeners/order-events.listener';
+import { KafkaModule } from '../../kafka/kafka.module';
+import { OrderEventsService } from './services/order-events.service';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Order, OrderItem, OrderReconciliation]),
     LoggerModule,
     ElasticsearchConfigModule,
+    KafkaModule,
   ],
   controllers: [OrderController],
   providers: [
@@ -27,6 +30,7 @@ import { OrderEventsListener } from './listeners/order-events.listener';
     OrderElasticsearchService,
     OrderReconciliationService,
     OrderEventsListener,
+    OrderEventsService,
     {
       provide: APP_FILTER,
       useClass: OrderExceptionFilter,

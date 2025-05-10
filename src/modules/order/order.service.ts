@@ -28,12 +28,19 @@ import {
   ElasticsearchNotFoundException,
   ElasticsearchSearchException,
 } from '../../common/exceptions/elasticsearch-exceptions';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Order } from './entities/order.entity';
+import { OrderEventsService } from './services/order-events.service';
 
 /**
  * Main service that orchestrates order operations between data sources
  */
 @Injectable()
 export class OrderService {
+  // Remove this line - it creates the duplicate logger declaration
+  // private readonly logger = new Logger(OrderService.name);
+
   /**
    * Creates an instance of OrderService
    *
@@ -47,6 +54,9 @@ export class OrderService {
     private readonly orderElasticsearchService: OrderElasticsearchService,
     private readonly eventEmitter: EventEmitter2,
     private readonly logger: LoggerService,
+    @InjectRepository(Order)
+    private readonly orderRepository: Repository<Order>,
+    private readonly orderEventsService: OrderEventsService,
   ) {}
 
   /**
@@ -71,6 +81,9 @@ export class OrderService {
         order,
         this.logger,
       );
+
+      // Also publish to Kafka
+      await this.orderEventsService.publishOrderCreated(order);
 
       return transformOrderToDto(order);
     } catch (error) {
@@ -156,7 +169,6 @@ export class OrderService {
       return transformOrderToDto(orderFromEs);
     } catch (error) {
       if (error instanceof ElasticsearchNotFoundException) {
-        // Converter exceção do Elasticsearch para OrderNotFoundException
         throw new OrderNotFoundException(uuid);
       }
 
@@ -171,7 +183,6 @@ export class OrderService {
         throw new OrderNotFoundException(uuid);
       }
 
-      // Para erros de conexão ou outros problemas com Elasticsearch
       if (error instanceof ElasticsearchSearchException) {
         this.logger.error(
           `Elasticsearch search error: ${error.message}`,
@@ -215,6 +226,8 @@ export class OrderService {
         throw new OrderNotModifiableException(currentOrder.status);
       }
 
+      const previousStatus = currentOrder.status;
+
       const updatedOrder = await this.orderPostgresService.update(
         uuid,
         updateOrderDto,
@@ -226,6 +239,13 @@ export class OrderService {
         updatedOrder,
         this.logger,
       );
+
+      if (previousStatus !== updatedOrder.status) {
+        await this.orderEventsService.publishOrderStatusUpdated(
+          updatedOrder,
+          previousStatus,
+        );
+      }
 
       return transformOrderToDto(updatedOrder);
     } catch (error) {
@@ -253,6 +273,9 @@ export class OrderService {
     try {
       this.logger.log(`Canceling order: ${uuid}`, 'OrderService');
 
+      const currentOrder = await this.orderPostgresService.findOneByUuid(uuid);
+      const previousStatus = currentOrder.status;
+
       const canceledOrder = await this.orderPostgresService.cancel(uuid);
 
       emitOrderEvent(
@@ -260,6 +283,11 @@ export class OrderService {
         OrderEventType.CANCELED,
         canceledOrder,
         this.logger,
+      );
+
+      await this.orderEventsService.publishOrderStatusUpdated(
+        canceledOrder,
+        previousStatus,
       );
 
       return transformOrderToDto(canceledOrder);
